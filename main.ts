@@ -1,0 +1,1053 @@
+import {
+	App,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	MarkdownView,
+	TAbstractFile,
+	Editor,
+	debounce,
+	Notice,
+} from "obsidian";
+
+import type { ViewState, Debouncer } from "obsidian";
+
+interface PluginSettings {
+	dbDir: string;
+}
+
+const DELAY_WRITING_DB = 500;
+
+const DEFAULT_SETTINGS: PluginSettings = {
+	dbDir: ".obsidian/plugins/anti-ephemeral-state/db",
+};
+
+interface TemporaryState {
+	cursor?: {
+		start: {
+			col: number;
+			line: number;
+		};
+		end: {
+			col: number;
+			line: number;
+		};
+	};
+	scroll?: number;
+	viewState?: ViewState; // Store the complete view state from getState()
+}
+
+/** Minimal shape we rely on from persisted JSON */
+interface MinimalViewState {
+	file?: string;
+}
+interface ParsedStateMinimal {
+	viewState?: MinimalViewState;
+}
+function isObject(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null;
+}
+function isParsedStateMinimal(v: unknown): v is ParsedStateMinimal {
+	if (!isObject(v)) return false;
+	const vs = (v as Record<string, unknown>).viewState;
+	if (vs === undefined) return true; // viewState is optional
+	if (!isObject(vs)) return false;
+	const file = (vs as Record<string, unknown>).file;
+	return file === undefined || typeof file === "string";
+}
+
+export default class AntiEphemeralState extends Plugin {
+	settings: PluginSettings;
+	lastTemporaryState: TemporaryState | null = null;
+	lastLoadedFileName: string;
+	loadingFile = false;
+	lastEventTime = 0;
+	debouncedSave: Debouncer<[string, TemporaryState], void>;
+	scrollListenersAttached = false; // Track if scroll listeners are already attached
+	restorationPromise: Promise<void> | null = null; // Promise to track restoration completion
+
+	// Improved hash function for file names with better collision resistance
+	getFileHash(filePath: string): string {
+		// Use a more robust hashing approach with multiple hash values
+		let hash1 = 0;
+		let hash2 = 0;
+		const prime1 = 31;
+		const prime2 = 37;
+
+		for (let i = 0; i < filePath.length; i++) {
+			const char = filePath.charCodeAt(i);
+			hash1 = (hash1 * prime1 + char) & 0x7fffffff; // Keep positive
+			hash2 = (hash2 * prime2 + char) & 0x7fffffff; // Keep positive
+		}
+
+		// Combine both hashes and add file length for extra uniqueness
+		const combined =
+			hash1.toString(36) +
+			hash2.toString(36) +
+			filePath.length.toString(36);
+		return combined;
+	}
+
+	// Resolve per-file state storage path (database file) for a specific note
+	getDbFilePath(filePath: string): string {
+		const hash = this.getFileHash(filePath);
+		return `${this.settings.dbDir}/${hash}.json`;
+	}
+
+	// Read state from the per-file database (state store)
+	async readFileState(filePath: string): Promise<TemporaryState | null> {
+		try {
+			const dbFilePath = this.getDbFilePath(filePath);
+			if (await this.app.vault.adapter.exists(dbFilePath)) {
+				let data = await this.app.vault.adapter.read(dbFilePath);
+
+				// Private validation function for viewState.file field
+				const validateViewStateFile = (
+					parsedData: unknown,
+					expectedFilePath: string
+				): boolean => {
+					if (!isParsedStateMinimal(parsedData)) return true; // if structure unknown, don't invalidate
+					const fileVal = parsedData.viewState?.file;
+					if (
+						typeof fileVal === "string" &&
+						fileVal !== expectedFilePath
+					) {
+						return false;
+					}
+					return true;
+				};
+
+				const parsedData = JSON.parse(data);
+
+				// Validate viewState.file field
+				if (!validateViewStateFile(parsedData, filePath)) {
+					// Update the invalid viewState.file field immediately
+					if (parsedData.viewState) {
+						parsedData.viewState.file = filePath;
+					}
+					// Save the corrected data back to the file
+					await this.app.vault.adapter.write(
+						dbFilePath,
+						JSON.stringify(parsedData)
+					);
+					// Return the corrected data
+					return parsedData;
+				}
+
+				let containsFlashingSpan =
+					this.app.workspace.containerEl.querySelector(
+						"span.is-flashing"
+					);
+				if (!containsFlashingSpan) {
+					return parsedData;
+				} else {
+					return null;
+				}
+			}
+		} catch (e) {
+			console.error("[AES] Error reading file state:", e);
+		}
+		return null;
+	}
+
+	// Write state to the per-file database (state store)
+	async writeFileState(
+		filePath: string,
+		state: TemporaryState
+	): Promise<void> {
+		try {
+			const dbFilePath = this.getDbFilePath(filePath);
+
+			// Ensure database directory exists (state persistence root)
+			if (!(await this.app.vault.adapter.exists(this.settings.dbDir))) {
+				await this.app.vault.adapter.mkdir(this.settings.dbDir);
+			}
+
+			await this.app.vault.adapter.write(
+				dbFilePath,
+				JSON.stringify(state)
+			);
+			console.log("[AES] State saved to database file:", dbFilePath);
+		} catch (e) {
+			console.error("[AES] Error writing file state:", e);
+		}
+	}
+
+	// Validate entire database directory: fix wrong viewState.file, remove DB entries for missing notes
+	async validateDatabase(): Promise<void> {
+		const dbDir = this.settings.dbDir;
+		let total = 0;
+		let fixedViewStatePath = 0;
+		let removedMissingNote = 0;
+		let removedInvalidEntry = 0;
+		let errors = 0;
+
+		try {
+			// Ensure database directory exists
+			if (!(await this.app.vault.adapter.exists(dbDir))) {
+				new Notice("[AES] Validation: database directory not found");
+				return;
+			}
+
+			// Read directory listing
+			const entries = await this.app.vault.adapter.list(dbDir);
+			const files = (entries.files || []).filter(f =>
+				f.toLowerCase().endsWith(".json")
+			);
+
+			for (const dbFilePath of files) {
+				total++;
+
+				try {
+					const raw = await this.app.vault.adapter.read(dbFilePath);
+					let parsed: unknown;
+					try {
+						parsed = JSON.parse(raw);
+					} catch {
+						// Invalid JSON -> remove
+						await this.app.vault.adapter.remove(dbFilePath);
+						removedInvalidEntry++;
+						continue;
+					}
+
+					// Determine note path from viewState.file if present
+					let notePath: string | undefined = undefined;
+					if (isParsedStateMinimal(parsed)) {
+						const fileVal = parsed.viewState?.file;
+						if (typeof fileVal === "string") {
+							notePath = fileVal;
+						}
+					}
+
+					if (!notePath) {
+						// Cannot correlate DB entry to a note -> remove
+						await this.app.vault.adapter.remove(dbFilePath);
+						removedInvalidEntry++;
+						continue;
+					}
+
+					// Optional: validate and fix wrong viewState.file (should equal notePath itself after decision)
+					// Here we mirror logic from readFileState(): the expected path for the state is exactly notePath.
+					// If the JSON was produced for a different file and moved, we correct to notePath (self-consistent).
+					let changed = false;
+					if (isParsedStateMinimal(parsed)) {
+						if (parsed.viewState?.file !== notePath) {
+							// ensure container objects exist before assignment
+							if (!parsed.viewState) parsed.viewState = {};
+							parsed.viewState.file = notePath;
+							changed = true;
+						}
+					}
+
+					// Check whether the note actually exists
+					const exists =
+						await this.app.vault.adapter.exists(notePath);
+					if (!exists) {
+						// Remove DB file if corresponding note is missing
+						await this.app.vault.adapter.remove(dbFilePath);
+						removedMissingNote++;
+						continue;
+					}
+
+					// If we changed anything in the JSON, write back
+					if (changed) {
+						await this.app.vault.adapter.write(
+							dbFilePath,
+							JSON.stringify(parsed)
+						);
+						fixedViewStatePath++;
+					}
+				} catch (e) {
+					console.error(
+						"[AES] Validation error for DB file:",
+						dbFilePath,
+						e
+					);
+					errors++;
+				}
+			}
+
+			new Notice(
+				`[AES] Validation completed. Total: ${total}, fixed viewState.file: ${fixedViewStatePath}, removed missing notes: ${removedMissingNote}, removed invalid: ${removedInvalidEntry}, errors: ${errors}`
+			);
+			console.log("[AES] Validation report", {
+				total,
+				fixedViewStatePath,
+				removedMissingNote,
+				removedInvalidEntry,
+				errors,
+			});
+		} catch (e) {
+			console.error("[AES] Error validating database directory:", e);
+			new Notice("[AES] Validation failed. See console.");
+		}
+	}
+
+	async onload() {
+		await this.loadSettings();
+
+		// Ensure database directory exists (state persistence root)
+		try {
+			if (!(await this.app.vault.adapter.exists(this.settings.dbDir))) {
+				await this.app.vault.adapter.mkdir(this.settings.dbDir);
+				console.log(
+					"[AES] Created database directory:",
+					this.settings.dbDir
+				);
+			}
+		} catch (e) {
+			console.error("[AES] Error creating database directory:", e);
+		}
+
+		this.addSettingTab(new SettingTab(this.app, this));
+
+		this.registerEvent(
+			this.app.workspace.on("file-open", async file => {
+				if (!file) return;
+
+				this.loadingFile = true;
+				this.lastLoadedFileName = file.path;
+
+				// Use layout-change event to ensure DOM is ready
+				const layoutChangeHandler = async () => {
+					const state = await this.readFileState(file.path);
+					console.log(
+						"[AES] Layout change detected for file:",
+						file.path,
+						"State found:",
+						!!state
+					);
+					if (state) {
+						console.log(
+							"[AES] Attempting to restore position:",
+							state
+						);
+						const activeLeaf =
+							this.app.workspace.getActiveViewOfType(
+								MarkdownView
+							);
+						if (activeLeaf) {
+							await this.app.workspace.revealLeaf(
+								activeLeaf.leaf
+							);
+							console.log(
+								"[AES] Calling setTemporaryState directly with state:",
+								state
+							);
+							this.setTemporaryState(state);
+						}
+						this.loadingFile = false;
+					} else {
+						console.log(
+							"[AES] No saved state found for file:",
+							file.path
+						);
+						this.loadingFile = false;
+					}
+					// Remove the one-time handler
+					this.app.workspace.off(
+						"layout-change",
+						layoutChangeHandler
+					);
+				};
+
+				// Register one-time layout-change handler
+				this.app.workspace.on("layout-change", layoutChangeHandler);
+			})
+		);
+
+		// No need for quit handler since we save immediately
+
+		this.registerEvent(
+			this.app.vault.on("rename", (file, oldPath) =>
+				this.renameFile(file, oldPath)
+			)
+		);
+
+		this.registerEvent(
+			this.app.vault.on("delete", file => this.deleteFile(file))
+		);
+
+		// Event-driven approach: listen to editor changes
+		this.registerEvent(
+			this.app.workspace.on("editor-change", () => this.onEditorChange())
+		);
+
+		// Listen to layout changes for scroll events
+		this.registerEvent(
+			this.app.workspace.on("layout-change", () => this.onLayoutChange())
+		);
+
+		// Listen to active leaf changes
+		this.registerEvent(
+			this.app.workspace.on("active-leaf-change", () => {
+				this.onActiveLeafChange();
+			})
+		);
+
+		// Setup DOM event listeners for scroll and cursor events
+		this.setupDOMEventListeners();
+
+		// Initialize debounced save function using Obsidian's debounce
+		this.debouncedSave = debounce(
+			(filePath: string, state: TemporaryState) => {
+				this.writeFileState(filePath, state);
+			},
+			DELAY_WRITING_DB,
+			true
+		);
+
+		this.restoreTemporaryState();
+	}
+
+	async renameFile(file: TAbstractFile, oldPath: string) {
+		try {
+			// Read state from old database file
+			const oldState = await this.readFileState(oldPath);
+			if (oldState) {
+				// Write to new database file
+				await this.writeFileState(file.path, oldState);
+				// Delete old database file
+				const oldDbFilePath = this.getDbFilePath(oldPath);
+				if (await this.app.vault.adapter.exists(oldDbFilePath)) {
+					await this.app.vault.adapter.remove(oldDbFilePath);
+				}
+			}
+		} catch (e) {
+			console.error("[AES] Error renaming file database:", e);
+		}
+	}
+
+	async deleteFile(file: TAbstractFile) {
+		try {
+			const dbFilePath = this.getDbFilePath(file.path);
+			if (await this.app.vault.adapter.exists(dbFilePath)) {
+				await this.app.vault.adapter.remove(dbFilePath);
+				console.log("[AES] Deleted database file for:", file.path);
+			}
+		} catch (e) {
+			console.error("[AES] Error deleting file database:", e);
+		}
+	}
+
+	// Event handlers for the new event-driven approach
+	onEditorChange() {
+		this.checkTemporaryStateChanged();
+	}
+
+	onLayoutChange() {
+		this.checkTemporaryStateChanged();
+	}
+
+	onActiveLeafChange() {
+		this.checkTemporaryStateChanged();
+	}
+
+	// Setup DOM event listeners for scroll and cursor events
+	setupDOMEventListeners() {
+		// Listen to mouse events for cursor position changes
+		this.registerDomEvent(document, "mouseup", () => {
+			this.checkTemporaryStateChanged();
+		});
+
+		// Listen to keyboard events for cursor position changes
+		this.registerDomEvent(document, "keyup", evt => {
+			// Only track navigation keys and selection changes
+			if (
+				[
+					"ArrowUp",
+					"ArrowDown",
+					"ArrowLeft",
+					"ArrowRight",
+					"Home",
+					"End",
+					"PageUp",
+					"PageDown",
+				].includes(evt.key)
+			) {
+				this.checkTemporaryStateChanged();
+			}
+		});
+
+		// Setup scroll event listeners on workspace container
+		this.setupScrollEventListeners();
+	}
+
+	// Setup scroll event listeners on the workspace container
+	setupScrollEventListeners() {
+		// Wait for workspace to be ready, then attach scroll listeners
+		this.app.workspace.onLayoutReady(() => {
+			this.attachScrollListeners();
+		});
+	}
+
+	// Attach scroll listeners to the appropriate DOM elements
+	attachScrollListeners() {
+		// Prevent multiple attachments
+		if (this.scrollListenersAttached) {
+			console.log("[AES] Scroll listeners already attached, skipping");
+			return;
+		}
+
+		// Find the main workspace container
+		const workspaceEl = document.querySelector(".workspace");
+		if (workspaceEl) {
+			console.log("[AES] Attaching scroll listener to workspace");
+			this.registerDomEvent(
+				workspaceEl as HTMLElement,
+				"scroll",
+				() => {
+					this.checkTemporaryStateChanged();
+				},
+				{ passive: true, capture: true }
+			);
+		}
+
+		// Also listen to scroll events on the main content area
+		const contentEl = document.querySelector(".workspace-leaf-content");
+		if (contentEl) {
+			console.log("[AES] Attaching scroll listener to content area");
+			this.registerDomEvent(
+				contentEl as HTMLElement,
+				"scroll",
+				() => {
+					this.checkTemporaryStateChanged();
+				},
+				{ passive: true, capture: true }
+			);
+		}
+
+		// Listen to scroll events on the editor container specifically
+		const editorEl = document.querySelector(".cm-editor");
+		if (editorEl) {
+			console.log("[AES] Attaching scroll listener to editor");
+			this.registerDomEvent(
+				editorEl as HTMLElement,
+				"scroll",
+				() => {
+					this.checkTemporaryStateChanged();
+				},
+				{ passive: true, capture: true }
+			);
+		}
+
+		// Fallback: listen to scroll events on document body
+		this.registerDomEvent(
+			document.body,
+			"scroll",
+			() => {
+				this.checkTemporaryStateChanged();
+			},
+			{ passive: true, capture: true }
+		);
+
+		// Mark listeners as attached
+		this.scrollListenersAttached = true;
+		console.log("[AES] All scroll listeners attached successfully");
+	}
+
+	// Override onunload to cleanup
+	onunload() {
+		// Cancel any pending debounced save
+		if (this.debouncedSave) {
+			this.debouncedSave.cancel();
+		}
+		// Reset scroll listeners flag for clean reload
+		this.scrollListenersAttached = false;
+		// No need for final save since we save immediately
+		super.onunload();
+	}
+
+	checkTemporaryStateChanged() {
+		requestAnimationFrame(async () => {
+			// Wait for any ongoing restoration to complete
+			if (this.restorationPromise) {
+				await this.restorationPromise;
+			}
+			this.performStateCheck();
+		});
+	}
+
+	performStateCheck() {
+		let fileName = this.app.workspace.getActiveFile()?.path;
+
+		// waiting for the new file to finish loading
+		if (
+			!fileName ||
+			!this.lastLoadedFileName ||
+			fileName != this.lastLoadedFileName ||
+			this.loadingFile
+		)
+			return;
+
+		let state = this.getTemporaryState();
+
+		// Don't save empty/meaningless states
+		const isEmptyState = (state: TemporaryState) => {
+			return (
+				Object.keys(state).length === 0 ||
+				(!state.cursor && !state.scroll && !state.viewState)
+			);
+		};
+
+		if (isEmptyState(state)) {
+			console.log("[AES] Skipping save of empty state");
+			return;
+		}
+
+		if (!this.lastTemporaryState) this.lastTemporaryState = state;
+
+		if (!this.TemporaryStatesSame(state, this.lastTemporaryState)) {
+			this.saveTemporaryState(state);
+			// Update last known state
+			this.lastTemporaryState = state;
+		}
+	}
+
+	TemporaryStatesSame(
+		left: TemporaryState | null,
+		right: TemporaryState | null
+	): boolean {
+		// Handle null/empty states
+		if (!left && !right) return true;
+		if (!left || !right) return false;
+
+		// Check if both states are effectively empty
+		const isEmptyState = (state: TemporaryState) => {
+			return (
+				Object.keys(state).length === 0 ||
+				(!state.cursor && !state.scroll && !state.viewState)
+			);
+		};
+
+		const leftEmpty = isEmptyState(left);
+		const rightEmpty = isEmptyState(right);
+
+		if (leftEmpty && rightEmpty) return true;
+		if (leftEmpty !== rightEmpty) return false;
+		// Cursor presence symmetry
+		const leftHasCursor = !!left.cursor;
+		const rightHasCursor = !!right.cursor;
+		if (leftHasCursor !== rightHasCursor) return false;
+
+		// Cursor comparing
+		if (leftHasCursor) {
+			const lc = left.cursor!;
+			const rc = right.cursor!;
+			if (lc.start.col !== rc.start.col) return false;
+			if (lc.start.line !== rc.start.line) return false;
+			if (lc.end.col !== rc.end.col) return false;
+			if (lc.end.line !== rc.end.line) return false;
+		}
+
+		// Scroll presence symmetry
+		const leftHasScroll = !!left.scroll;
+		const rightHasScroll = !!right.scroll;
+		if (leftHasScroll !== rightHasScroll) return false;
+
+		// Scroll equality
+		if (leftHasScroll && left.scroll !== right.scroll) return false;
+
+		// View state deep structural equality via JSON representation
+		if (JSON.stringify(left.viewState) !== JSON.stringify(right.viewState))
+			return false;
+
+		return true;
+	}
+
+	async saveTemporaryState(state: TemporaryState) {
+		let fileName = this.app.workspace.getActiveFile()?.path;
+		console.log(
+			"[AES] saveTemporaryState called, fileName:",
+			fileName,
+			"lastLoadedFileName:",
+			this.lastLoadedFileName
+		);
+		if (fileName && fileName == this.lastLoadedFileName) {
+			//do not save if file changed or was not loaded
+			console.log(
+				"[AES] Saving state for file:",
+				fileName,
+				"State:",
+				state
+			);
+			// Use debounced save to prevent excessive state file writes
+			this.debouncedSave(fileName, state);
+		} else {
+			console.log(
+				"[AES] Cannot save state - file changed or not loaded properly"
+			);
+		}
+	}
+
+	async restoreTemporaryState() {
+		this.restorationPromise = this.performRestoration();
+		await this.restorationPromise;
+		this.restorationPromise = null;
+	}
+
+	private async performRestoration() {
+		try {
+			await this.restoreTemporaryStateWithRetry(5);
+		} catch (error) {
+			console.error(
+				"[AES] Failed to restore temporary state after all retries:",
+				error
+			);
+			// Show user notification about restoration failure
+			new Notice(
+				"[AES] Failed to restore note state. Try reopening the note.",
+				3000
+			);
+			// Reset loading state to prevent getting stuck
+			this.loadingFile = false;
+			// Set restorationPromise to a resolved promise to prevent further operations
+			this.restorationPromise = Promise.resolve();
+		}
+	}
+
+	private async restoreTemporaryStateWithRetry(
+		maxAttempts: number
+	): Promise<void> {
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				let fileName = this.app.workspace.getActiveFile()?.path;
+				// Check if we have a valid file name
+				if (!fileName) {
+					if (attempt < maxAttempts) {
+						const delayMs = 10 * Math.pow(2, attempt - 1);
+						console.log(
+							`[AES] Attempt ${attempt}/${maxAttempts}: No active file found, retrying in ${delayMs}ms`
+						);
+						await this.delay(delayMs);
+						continue;
+					} else {
+						console.warn(
+							"[AES] No active file found after all retry attempts"
+						);
+						return;
+					}
+				}
+
+				console.log(
+					`[AES] Attempt ${attempt}/${maxAttempts} - restoreTemporaryState called for file:`,
+					fileName,
+					"loadingFile:",
+					this.loadingFile,
+					"lastLoadedFileName:",
+					this.lastLoadedFileName
+				);
+
+				if (
+					fileName &&
+					this.loadingFile &&
+					this.lastLoadedFileName == fileName
+				) {
+					//if already started loading
+					console.log("[AES] Already loading this file, skipping");
+					return;
+				}
+
+				// Simplified logic without leaf tracking to avoid API compatibility issues
+				this.loadingFile = true;
+
+				if (this.lastLoadedFileName != fileName) {
+					console.log(
+						"[AES] New file detected, preparing for state load"
+					);
+					this.lastTemporaryState = null;
+					this.lastLoadedFileName = fileName;
+
+					let state: TemporaryState | null = null;
+
+					if (fileName) {
+						state = await this.readFileState(fileName);
+						console.log(
+							"[AES] Found state in database for file:",
+							fileName,
+							"State:",
+							state
+						);
+						if (state) {
+							console.log(
+								"[AES] Calling setTemporaryState with:",
+								state
+							);
+							this.setTemporaryState(state);
+						} else {
+							console.log(
+								"[AES] No state found in database for file:",
+								fileName
+							);
+						}
+					}
+					this.lastTemporaryState = state || null;
+				} else {
+					console.log("[AES] Same file as before, not restoring");
+				}
+
+				this.loadingFile = false;
+				console.log(
+					`[AES] restoreTemporaryState completed successfully on attempt ${attempt}`
+				);
+				return; // Success, exit retry loop
+			} catch (error) {
+				console.error(
+					`[AES] Attempt ${attempt}/${maxAttempts} failed:`,
+					error
+				);
+				if (attempt < maxAttempts) {
+					const delayMs = 10 * Math.pow(2, attempt - 1);
+					console.log(`[AES] Retrying in ${delayMs}ms...`);
+					await this.delay(delayMs);
+				} else {
+					// Reset loading state on final failure
+					this.loadingFile = false;
+					throw error;
+				}
+			}
+		}
+	}
+
+	getTemporaryState(): TemporaryState {
+		let state: TemporaryState = {};
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+
+		if (view) {
+			// Get the complete view state using official API
+			const viewState = view.getState();
+			state.viewState = { ...viewState, type: view.getViewType() };
+
+			// Get scroll position with better error handling
+			const scrollPos = view.currentMode?.getScroll();
+			if (
+				scrollPos !== undefined &&
+				scrollPos !== null &&
+				!isNaN(scrollPos)
+			) {
+				state.scroll = Number(scrollPos.toFixed(4));
+				console.log("[AES] Current scroll position:", state.scroll);
+			} else {
+				console.log(
+					"[AES] Could not get scroll position from view.currentMode"
+				);
+				// Try alternative method using editor scroll info
+				const editor = this.getEditor();
+				if (editor) {
+					const scrollInfo = editor.getScrollInfo();
+					if (scrollInfo && scrollInfo.top) {
+						state.scroll = Number(scrollInfo.top.toFixed(4));
+						console.log(
+							"[AES] Got scroll from editor.getScrollInfo():",
+							state.scroll
+						);
+					}
+				}
+			}
+			console.log("[AES] Current view state:", state.viewState);
+		}
+
+		let editor = this.getEditor();
+		if (editor) {
+			let start = editor.getCursor("anchor");
+			let end = editor.getCursor("head");
+			if (start && end) {
+				state.cursor = {
+					start: {
+						col: start.ch,
+						line: start.line,
+					},
+					end: {
+						col: end.ch,
+						line: end.line,
+					},
+				};
+			}
+		}
+
+		return state;
+	}
+
+	setTemporaryState(state: TemporaryState) {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		console.log(
+			"[AES] setTemporaryState called with state:",
+			state,
+			"View found:",
+			!!view
+		);
+
+		// Restore view state if it was persisted
+		if (view && state.viewState) {
+			console.log("[AES] Restoring view state:", state.viewState);
+			view.setState(state.viewState, { history: false });
+		}
+
+		// Defer cursor and scroll restoration until the layout is fully ready
+		this.app.workspace.onLayoutReady(() => {
+			if (state.cursor) {
+				const editor = this.getEditor();
+				if (editor) {
+					console.log("[AES] Setting cursor position:", state.cursor);
+					const start = {
+						ch: state.cursor.start.col,
+						line: state.cursor.start.line,
+					};
+					const end = {
+						ch: state.cursor.end.col,
+						line: state.cursor.end.line,
+					};
+					editor.setSelection(start, end);
+				} else {
+					console.log("[AES] No editor found for cursor positioning");
+				}
+			}
+
+			if (view && state.scroll !== undefined) {
+				console.log("[AES] Setting scroll position:", state.scroll);
+				// Use requestAnimationFrame to defer scroll operations and prevent measure loops
+				requestAnimationFrame(() => {
+					view.setEphemeralState(state);
+					// Verify scroll position was set correctly with retry mechanism
+					this.verifyAndRetryScroll(view, state.scroll!, 0);
+				});
+			} else if (!view) {
+				console.log(
+					"[AES] No MarkdownView found for scroll positioning"
+				);
+			}
+		});
+	}
+
+	private getEditor(): Editor | undefined {
+		return this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+	}
+
+	async loadSettings() {
+		let settings: PluginSettings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
+		this.settings = settings;
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
+	}
+
+	async delay(ms: number) {
+		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	// Verify scroll position and retry if needed
+	private async verifyAndRetryScroll(
+		view: MarkdownView,
+		targetScroll: number,
+		attempt: number
+	) {
+		const maxAttempts = 4; // 4 attempts as requested
+		const retryDelay = 30; // Shorter delay
+		const tolerance = 0.02; // 2% tolerance as requested
+
+		// Wait a bit for the scroll to be applied
+		await this.delay(30);
+
+		const currentScroll = view.currentMode?.getScroll();
+		if (currentScroll !== undefined) {
+			const scrollDifference = Math.abs(currentScroll - targetScroll);
+			const allowedDifference = Math.max(targetScroll * tolerance, 2); // At least 2px tolerance
+
+			console.log(
+				"[AES] Scroll verification - Target:",
+				targetScroll,
+				"Current:",
+				currentScroll,
+				"Difference:",
+				scrollDifference,
+				"Allowed:",
+				allowedDifference
+			);
+
+			if (scrollDifference <= allowedDifference) {
+				console.log("[AES] Scroll position verified successfully");
+				return;
+			}
+
+			if (attempt < maxAttempts - 1) {
+				console.log(
+					`[AES] Scroll position mismatch, retrying (attempt ${attempt + 1}/${maxAttempts})`
+				);
+				// Use requestAnimationFrame to avoid forced reflows
+				requestAnimationFrame(() => {
+					if (view.currentMode?.applyScroll) {
+						view.currentMode.applyScroll(targetScroll);
+					}
+				});
+
+				// Wait and retry
+				await this.delay(retryDelay);
+				await this.verifyAndRetryScroll(
+					view,
+					targetScroll,
+					attempt + 1
+				);
+			} else {
+				console.log(
+					"[AES] Scroll position close enough, accepting current position"
+				);
+				// Don't show notification for minor differences
+			}
+		} else {
+			console.log(
+				"[AES] Could not get current scroll position for verification"
+			);
+		}
+	}
+}
+
+class SettingTab extends PluginSettingTab {
+	plugin: AntiEphemeralState;
+
+	constructor(app: App, plugin: AntiEphemeralState) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
+
+	display(): void {
+		let { containerEl } = this;
+
+		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName("Database directory")
+			.setDesc(
+				"Root directory for per-file state persistence (one database file per note)"
+			)
+			.addText(text =>
+				text
+					.setPlaceholder(
+						"Example: .obsidian/plugins/anti-ephemeral-state/db"
+					)
+					.setValue(this.plugin.settings.dbDir)
+					.onChange(async value => {
+						this.plugin.settings.dbDir = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Validation of database")
+			.setDesc(
+				"Iterate over database entries, fix wrong viewState.file, and remove entries for missing notes"
+			)
+			.addButton(btn => {
+				btn.setButtonText("Run validation")
+					.setCta()
+					.onClick(async () => {
+						new Notice("[AES] Validation started...", 1000);
+						await this.plugin.validateDatabase();
+					});
+			});
+	}
+}
