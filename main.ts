@@ -18,10 +18,6 @@ interface PluginSettings {
 
 const DELAY_WRITING_DB = 500;
 
-const DEFAULT_SETTINGS: PluginSettings = {
-	dbDir: ".obsidian/plugins/anti-ephemeral-state/db",
-};
-
 interface TemporaryState {
 	cursor?: {
 		start: {
@@ -58,6 +54,7 @@ function isParsedStateMinimal(v: unknown): v is ParsedStateMinimal {
 
 export default class AntiEphemeralState extends Plugin {
 	settings: PluginSettings;
+	DEFAULT_SETTINGS: PluginSettings; // declare as public class property
 	lastTemporaryState: TemporaryState | null = null;
 	lastLoadedFileName: string;
 	loadingFile = false;
@@ -284,6 +281,12 @@ export default class AntiEphemeralState extends Plugin {
 	}
 
 	async onload() {
+		// Initialize DEFAULT_SETTINGS with access to this.app
+		this.DEFAULT_SETTINGS = {
+			dbDir:
+				this.app.vault.configDir + "/plugins/anti-ephemeral-state/db",
+		};
+
 		await this.loadSettings();
 
 		// Ensure database directory exists (state persistence root)
@@ -926,7 +929,7 @@ export default class AntiEphemeralState extends Plugin {
 	async loadSettings() {
 		let settings: PluginSettings = Object.assign(
 			{},
-			DEFAULT_SETTINGS,
+			this.DEFAULT_SETTINGS,
 			await this.loadData()
 		);
 		this.settings = settings;
@@ -1026,9 +1029,7 @@ class SettingTab extends PluginSettingTab {
 			)
 			.addText(text =>
 				text
-					.setPlaceholder(
-						"Example: .obsidian/plugins/anti-ephemeral-state/db"
-					)
+					.setPlaceholder(this.plugin.DEFAULT_SETTINGS.dbDir)
 					.setValue(this.plugin.settings.dbDir)
 					.onChange(async value => {
 						this.plugin.settings.dbDir = value;
