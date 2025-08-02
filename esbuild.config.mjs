@@ -21,7 +21,7 @@ const buildConfigs = {
 	production: {
 		sourcemap: "inline",
 		minify: true,
-		drop: ['console'],
+		drop: ["console"],
 		watch: false,
 	},
 };
