@@ -67,8 +67,8 @@ export default [
 		files: [
 			"**/*.test.ts",
 			"**/*.test.js",
-			"__mocks__/**/*.ts",
-			"__mocks__/**/*.js",
+			"**/__mocks__/**/*.ts",
+			"**/__mocks__/**/*.js",
 		],
 		languageOptions: {
 			globals: {
@@ -87,7 +87,7 @@ export default [
 	},
 	// Node.js files configuration
 	{
-		files: ["**/*.js", "__mocks__/**/*.js"],
+		files: ["**/*.js", "**/__mocks__/**/*.js"],
 		languageOptions: {
 			globals: {
 				module: "readonly",
@@ -107,7 +107,7 @@ export default [
 	},
 	// Mock files configuration - relaxed rules for test mocks
 	{
-		files: ["__mocks__/**/*.ts", "__mocks__/**/*.js"],
+		files: ["**/__mocks__/**/*.ts", "**/__mocks__/**/*.js"],
 		rules: {
 			"@typescript-eslint/no-explicit-any": "off",
 			"@typescript-eslint/no-unused-vars": "off",
