@@ -313,6 +313,28 @@ export default class AntiEphemeralState extends Plugin {
 
 				// Use layout-change event to ensure DOM is ready
 				const layoutChangeHandler = async () => {
+					// Get the current active file instead of using the file from closure
+					const activeLeaf =
+						this.app.workspace.getActiveViewOfType(MarkdownView);
+					const currentFile = activeLeaf?.file;
+
+					// Only proceed if current file matches the file that triggered the event
+					if (!currentFile || currentFile.path !== file.path) {
+						console.log(
+							"[AES] Layout change - file mismatch, expected:",
+							file.path,
+							"current:",
+							currentFile?.path,
+							"- skipping restoration"
+						);
+						this.loadingFile = false;
+						this.app.workspace.off(
+							"layout-change",
+							layoutChangeHandler
+						);
+						return;
+					}
+
 					const state = await this.readFileState(file.path);
 					console.log(
 						"[AES] Layout change detected for file:",
@@ -325,10 +347,6 @@ export default class AntiEphemeralState extends Plugin {
 							"[AES] Attempting to restore position:",
 							state
 						);
-						const activeLeaf =
-							this.app.workspace.getActiveViewOfType(
-								MarkdownView
-							);
 						if (activeLeaf) {
 							await this.app.workspace.revealLeaf(
 								activeLeaf.leaf
