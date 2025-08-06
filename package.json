@@ -1,6 +1,6 @@
 {
 	"name": "anti-ephemeral-state",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Per-note state persistence: scroll, cursor, and view mode memory for Obsidian",
 	"main": "main.js",
 	"scripts": {
