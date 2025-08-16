@@ -70,6 +70,7 @@ export default class AntiEphemeralState extends Plugin {
 	restorationPromise: Promise<void> | null = null; // Promise to track restoration completion
 	private lockStatusBar?: LockStatusBar; // status bar controller when Lock Mode enabled
 	private checksumIntegrity?: ChecksumIntegrity; // integrity helper
+	lockManager?: LockManager; // lock manager controller
 
 	// Improved hash function for file names with better collision resistance
 	getFileHash(filePath: string): string {
@@ -355,6 +356,7 @@ export default class AntiEphemeralState extends Plugin {
 		if (this.settings.lockModeEnabled !== false) {
 			this.lockStatusBar = new LockStatusBar(this);
 			this.checksumIntegrity = new ChecksumIntegrity(this);
+			this.lockManager = new LockManager(this);
 		}
 
 		this.registerEvent(
@@ -422,6 +424,13 @@ export default class AntiEphemeralState extends Plugin {
 								);
 							}
 						}
+
+						// Update lock icon according to saved state
+						if (this.lockStatusBar) {
+							this.lockStatusBar.updateIcon(
+								state.protected ? "locked" : "unlocked"
+							);
+						}
 						console.log(
 							"[AES] Attempting to restore position:",
 							state
@@ -442,6 +451,10 @@ export default class AntiEphemeralState extends Plugin {
 							"[AES] No saved state found for file:",
 							file.path
 						);
+						// No state -> show unlocked icon
+						if (this.lockStatusBar) {
+							this.lockStatusBar.updateIcon("unlocked");
+						}
 						this.loadingFile = false;
 					}
 					// Remove the one-time handler
@@ -771,8 +784,42 @@ export default class AntiEphemeralState extends Plugin {
 				"State:",
 				state
 			);
+			// Preserve Lock Mode fields from existing persisted state to avoid accidental overwrite
+			let merged: TemporaryState = state;
+			try {
+				const existing = await this.readFileState(fileName);
+				if (existing) {
+					merged = {
+						...existing, // keep protected/timestamp and previous fields
+						...state, // override cursor/scroll/viewState from fresh capture
+					};
+					// Explicitly carry over lock fields if present to avoid undefined defaults
+					if (typeof existing.protected === "boolean") {
+						merged.protected = existing.protected;
+					}
+					if (
+						existing.timestamp === null ||
+						typeof existing.timestamp === "number"
+					) {
+						merged.timestamp = existing.timestamp;
+					}
+				} else if (this.lastTemporaryState) {
+					// Use in-memory last state as a fallback source of lock fields
+					merged = {
+						...state,
+						protected: this.lastTemporaryState.protected,
+						timestamp: this.lastTemporaryState.timestamp,
+					};
+				}
+			} catch (e) {
+				console.warn(
+					"[AES] Failed to merge existing state, proceeding:",
+					e
+				);
+			}
+
 			// Use debounced save to prevent excessive state file writes
-			this.debouncedSave(fileName, state);
+			this.debouncedSave(fileName, merged);
 		} else {
 			console.log(
 				"[AES] Cannot save state - file changed or not loaded properly"
@@ -1023,6 +1070,18 @@ export default class AntiEphemeralState extends Plugin {
 		return this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 	}
 
+	// Public accessors for internal components used by LockManager
+	getLockStatusBar(): LockStatusBar | undefined {
+		return this.lockStatusBar;
+	}
+
+	getChecksumIntegrity(): ChecksumIntegrity {
+		if (!this.checksumIntegrity) {
+			this.checksumIntegrity = new ChecksumIntegrity(this);
+		}
+		return this.checksumIntegrity;
+	}
+
 	async loadSettings() {
 		let settings: PluginSettings = Object.assign(
 			{},
@@ -1178,9 +1237,11 @@ class LockStatusBar {
 		}
 	}
 
-	private onClick(): void {
-		// Basic toggle (no persistence yet)
-		this.updateIcon(this.state === "locked" ? "unlocked" : "locked");
+	private async onClick(): Promise<void> {
+		// Delegate to LockManager to toggle protection for the active file
+		const filePath = this.plugin.app.workspace.getActiveFile()?.path;
+		if (!filePath) return;
+		await this.plugin.lockManager?.toggleLockState(filePath);
 	}
 }
 
@@ -1210,3 +1271,59 @@ class ChecksumIntegrity {
 		return current === expectedTimestamp;
 	}
 }
+
+// Lock manager controlling protected state and status bar integration
+class LockManager {
+	private plugin: AntiEphemeralState;
+
+	constructor(plugin: AntiEphemeralState) {
+		this.plugin = plugin;
+	}
+
+	// Toggle protection for the given file
+	async toggleLockState(filePath: string): Promise<void> {
+		// Read current state
+		const current = (await this.plugin.readFileState(filePath)) || {};
+		const nextProtected = !current.protected;
+
+		// Update UI icon early for responsiveness
+		const sb = this.plugin.getLockStatusBar();
+		if (sb) {
+			sb.updateIcon(nextProtected ? "locked" : "unlocked");
+		}
+
+		// Persist new state with timestamp if locking
+		let timestamp: number | null = null;
+		if (nextProtected) {
+			try {
+				const integrity = this.plugin.getChecksumIntegrity();
+				timestamp = await integrity.getFileTimestamp(filePath);
+			} catch (e) {
+				console.error("[AES] Failed to acquire timestamp for lock:", e);
+				timestamp = null;
+			}
+		}
+
+		const newState: TemporaryState = {
+			...current,
+			protected: nextProtected,
+			timestamp,
+		};
+
+		await this.plugin.writeFileState(filePath, newState);
+		// Keep plugin memory in sync to prevent later auto-saves from overwriting lock fields
+		this.plugin.lastTemporaryState = {
+			...(this.plugin.lastTemporaryState || {}),
+			...newState,
+		};
+	}
+
+	// Returns true when file is considered locked
+	async isFileLocked(filePath: string): Promise<boolean> {
+		const current = await this.plugin.readFileState(filePath);
+		return !!current?.protected;
+	}
+}
+
+// Public helpers to access private components safely
+// They are methods of AntiEphemeralState class; patching by appending below class definitions is not valid.
