@@ -1096,12 +1096,31 @@ export default class AntiEphemeralState extends Plugin {
 		return this.checksumIntegrity;
 	}
 
+	// Enable Lock Mode UI live (create status bar if missing)
+	enableLockMode(): void {
+		if (!this.lockStatusBar) {
+			this.lockStatusBar = new LockStatusBar(this);
+		}
+	}
+
+	// Disable Lock Mode UI live (remove status bar)
+	disableLockMode(): void {
+		if (this.lockStatusBar) {
+			this.lockStatusBar.dispose();
+			this.lockStatusBar = undefined;
+		}
+	}
+
 	async loadSettings() {
 		let settings: PluginSettings = Object.assign(
 			{},
 			this.DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+		// Apply default for lockModeEnabled (enabled by default)
+		if (typeof settings.lockModeEnabled !== "boolean") {
+			settings.lockModeEnabled = true;
+		}
 		this.settings = settings;
 	}
 
@@ -1220,6 +1239,33 @@ class SettingTab extends PluginSettingTab {
 						await this.plugin.validateDatabase();
 					});
 			});
+
+		// Toggle to enable/disable Lock Mode
+		new Setting(containerEl)
+			.setName("Enable Lock Mode")
+			.setDesc(
+				"Show Lock Mode UI and enforce read-only for protected notes"
+			)
+			.addToggle(toggle =>
+				toggle
+					.setValue(this.plugin.settings.lockModeEnabled !== false)
+					.onChange(async value => {
+						this.plugin.settings.lockModeEnabled = value;
+						await this.plugin.saveSettings();
+						if (value) {
+							this.plugin.enableLockMode();
+							// Ensure helpers exist
+							this.plugin.getChecksumIntegrity();
+							if (!this.plugin.lockManager) {
+								this.plugin.lockManager = new LockManager(
+									this.plugin
+								);
+							}
+						} else {
+							this.plugin.disableLockMode();
+						}
+					})
+			);
 	}
 }
 
@@ -1256,6 +1302,13 @@ class LockStatusBar {
 		const filePath = this.plugin.app.workspace.getActiveFile()?.path;
 		if (!filePath) return;
 		await this.plugin.lockManager?.toggleLockState(filePath);
+	}
+
+	// Remove DOM and detach listeners
+	dispose(): void {
+		if (this.el && this.el.remove) {
+			this.el.remove();
+		}
 	}
 }
 
