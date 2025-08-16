@@ -17,6 +17,7 @@ export interface MockManifest {
 export class MockVaultAdapter {
 	private files: Map<string, string> = new Map();
 	private directories: Set<string> = new Set();
+	private mtimes: Map<string, number> = new Map();
 
 	async read(path: string): Promise<string> {
 		if (!this.files.has(path)) {
@@ -34,6 +35,7 @@ export class MockVaultAdapter {
 			await this.mkdir(dir);
 		}
 		this.files.set(path, data);
+		this.mtimes.set(path, Date.now());
 	}
 
 	async exists(path: string): Promise<boolean> {
@@ -53,6 +55,7 @@ export class MockVaultAdapter {
 	async remove(path: string): Promise<void> {
 		this.files.delete(path);
 		this.directories.delete(path);
+		this.mtimes.delete(path);
 	}
 
 	async rename(oldPath: string, newPath: string): Promise<void> {
@@ -62,7 +65,18 @@ export class MockVaultAdapter {
 			if (data !== undefined) {
 				this.files.set(newPath, data);
 			}
+			const m = this.mtimes.get(oldPath) ?? Date.now();
+			this.mtimes.delete(oldPath);
+			this.mtimes.set(newPath, m);
 		}
+	}
+
+	async stat(path: string): Promise<{ mtime: number } | null> {
+		if (this.files.has(path)) {
+			const mtime = this.mtimes.get(path) ?? Date.now();
+			return { mtime };
+		}
+		return null;
 	}
 
 	async list(path: string): Promise<{ files: string[]; folders: string[] }> {
@@ -113,6 +127,7 @@ export class MockVaultAdapter {
 	reset(): void {
 		this.files.clear();
 		this.directories.clear();
+		this.mtimes.clear();
 	}
 
 	getAllFiles(): string[] {

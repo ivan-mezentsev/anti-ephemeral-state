@@ -69,6 +69,7 @@ export default class AntiEphemeralState extends Plugin {
 	scrollListenersAttached = false; // Track if scroll listeners are already attached
 	restorationPromise: Promise<void> | null = null; // Promise to track restoration completion
 	private lockStatusBar?: LockStatusBar; // status bar controller when Lock Mode enabled
+	private checksumIntegrity?: ChecksumIntegrity; // integrity helper
 
 	// Improved hash function for file names with better collision resistance
 	getFileHash(filePath: string): string {
@@ -353,6 +354,7 @@ export default class AntiEphemeralState extends Plugin {
 		// Initialize Lock Mode status bar
 		if (this.settings.lockModeEnabled !== false) {
 			this.lockStatusBar = new LockStatusBar(this);
+			this.checksumIntegrity = new ChecksumIntegrity(this);
 		}
 
 		this.registerEvent(
@@ -394,6 +396,32 @@ export default class AntiEphemeralState extends Plugin {
 						!!state
 					);
 					if (state) {
+						// Integrity check with mtime if Lock Mode is enabled and timestamp is present
+						if (
+							this.settings.lockModeEnabled !== false &&
+							this.checksumIntegrity &&
+							typeof state.timestamp === "number"
+						) {
+							try {
+								const ok =
+									await this.checksumIntegrity.verifyFileIntegrity(
+										file.path,
+										state.timestamp
+									);
+								if (!ok) {
+									console.warn(
+										"[AES] Integrity mismatch detected for",
+										file.path
+									);
+									// Non-UI flagging for now; visual indication will be added in a later step.
+								}
+							} catch (e) {
+								console.error(
+									"[AES] Integrity check failed:",
+									e
+								);
+							}
+						}
 						console.log(
 							"[AES] Attempting to restore position:",
 							state
@@ -1151,7 +1179,34 @@ class LockStatusBar {
 	}
 
 	private onClick(): void {
-		// Basic toggle for Task 1 only (no persistence yet)
+		// Basic toggle (no persistence yet)
 		this.updateIcon(this.state === "locked" ? "unlocked" : "locked");
+	}
+}
+
+// Minimal integrity checker using file modification time (mtime)
+class ChecksumIntegrity {
+	private plugin: AntiEphemeralState;
+
+	constructor(plugin: AntiEphemeralState) {
+		this.plugin = plugin;
+	}
+
+	// Get file modification timestamp in milliseconds using Obsidian adapter
+	async getFileTimestamp(filePath: string): Promise<number> {
+		const s = await this.plugin.app.vault.adapter.stat(filePath);
+		if (!s || typeof s.mtime !== "number") {
+			throw new Error(`[AES] stat() returned no mtime for ${filePath}`);
+		}
+		return s.mtime;
+	}
+
+	// Compare current mtime with expected timestamp
+	async verifyFileIntegrity(
+		filePath: string,
+		expectedTimestamp: number
+	): Promise<boolean> {
+		const current = await this.getFileTimestamp(filePath);
+		return current === expectedTimestamp;
 	}
 }
