@@ -677,6 +677,20 @@ export default class AntiEphemeralState extends Plugin {
 			if (this.restorationPromise) {
 				await this.restorationPromise;
 			}
+			// Minimal lock-mode enforcement hook before we compute/save state
+			const activePath = this.app.workspace.getActiveFile()?.path;
+			if (
+				activePath &&
+				this.settings.lockModeEnabled !== false &&
+				this.lockManager
+			) {
+				try {
+					await this.lockManager.enforceReadOnlyMode(activePath);
+				} catch (e) {
+					console.warn("[AES] enforceReadOnlyMode failed:", e);
+				}
+			}
+
 			this.performStateCheck();
 		});
 	}
@@ -1316,12 +1330,52 @@ class LockManager {
 			...(this.plugin.lastTemporaryState || {}),
 			...newState,
 		};
+
+		// If we just enabled protection, immediately enforce preview mode
+		if (nextProtected) {
+			await this.enforceReadOnlyMode(filePath);
+		}
 	}
 
 	// Returns true when file is considered locked
 	async isFileLocked(filePath: string): Promise<boolean> {
 		const current = await this.plugin.readFileState(filePath);
 		return !!current?.protected;
+	}
+
+	// Ensure MarkdownView is in preview when file is locked. Preserve cursor/scroll via plugin.setTemporaryState
+	async enforceReadOnlyMode(filePath: string): Promise<void> {
+		// Fast path: only act when current file matches and is locked
+		const active =
+			this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!active || active.file?.path !== filePath) return;
+		const locked = await this.isFileLocked(filePath);
+		if (!locked) return;
+
+		// Check current mode; if already preview, do nothing
+		const rawState = active.getState() as Record<string, unknown>;
+		const mode =
+			typeof rawState.mode === "string" ? rawState.mode : undefined;
+		if (mode === "preview") return;
+
+		// Capture cursor/scroll only to avoid restoring mode back to source
+		const ephemeral = this.plugin.getTemporaryState();
+		const toRestore: TemporaryState = {
+			cursor: ephemeral.cursor,
+			scroll: ephemeral.scroll,
+		};
+
+		// Switch to preview using official API
+		active.setState(
+			{
+				...(active.getState() as Record<string, unknown>),
+				mode: "preview",
+			},
+			{ history: false }
+		);
+
+		// Re-apply only cursor/scroll to avoid UX jumps
+		this.plugin.setTemporaryState(toRestore);
 	}
 }
 
