@@ -14,6 +14,8 @@ import type { ViewState, Debouncer } from "obsidian";
 
 interface PluginSettings {
 	dbDir: string;
+	// Whether Lock Mode UI and behavior is enabled
+	lockModeEnabled?: boolean; // default true
 }
 
 const DELAY_WRITING_DB = 500;
@@ -62,6 +64,7 @@ export default class AntiEphemeralState extends Plugin {
 	debouncedSave: Debouncer<[string, TemporaryState], void>;
 	scrollListenersAttached = false; // Track if scroll listeners are already attached
 	restorationPromise: Promise<void> | null = null; // Promise to track restoration completion
+	private lockStatusBar?: LockStatusBar; // status bar controller when Lock Mode enabled
 
 	// Improved hash function for file names with better collision resistance
 	getFileHash(filePath: string): string {
@@ -303,6 +306,11 @@ export default class AntiEphemeralState extends Plugin {
 		}
 
 		this.addSettingTab(new SettingTab(this.app, this));
+
+		// Initialize Lock Mode status bar
+		if (this.settings.lockModeEnabled !== false) {
+			this.lockStatusBar = new LockStatusBar(this);
+		}
 
 		this.registerEvent(
 			this.app.workspace.on("file-open", async file => {
@@ -1068,5 +1076,39 @@ class SettingTab extends PluginSettingTab {
 						await this.plugin.validateDatabase();
 					});
 			});
+	}
+}
+
+// Minimal Status Bar controller for Lock Mode UI
+class LockStatusBar {
+	private plugin: AntiEphemeralState;
+	private el: HTMLElement;
+	private state: "unlocked" | "locked" = "unlocked";
+
+	constructor(plugin: AntiEphemeralState) {
+		this.plugin = plugin;
+		this.el = this.plugin.addStatusBarItem();
+		this.el.classList.add("aes-lock-status");
+		this.el.setAttribute("aria-label", "Lock mode status");
+		this.el.addEventListener("click", () => this.onClick());
+		this.updateIcon(this.state);
+	}
+
+	// Update visual icon and tooltip
+	updateIcon(state: "unlocked" | "locked"): void {
+		this.state = state;
+		// Use simple emoji icons; can be replaced with Obsidian icons later
+		if (state === "locked") {
+			this.el.textContent = "🔒";
+			this.el.setAttribute("title", "Click to unlock document");
+		} else {
+			this.el.textContent = "🔓";
+			this.el.setAttribute("title", "Click to lock document");
+		}
+	}
+
+	private onClick(): void {
+		// Basic toggle for Task 1 only (no persistence yet)
+		this.updateIcon(this.state === "locked" ? "unlocked" : "locked");
 	}
 }

@@ -294,6 +294,12 @@ export class Plugin {
 
 	addCommand(): void {}
 	addSettingTab(): void {}
+	addStatusBarItem(): HTMLElement {
+		// Create a simple DOM element to simulate Obsidian status bar item
+		const el = document.createElement("div");
+		el.className = "status-bar-item";
+		return el;
+	}
 	registerEvent(eventRef: unknown): void {
 		// Mock implementation - just store the reference
 	}
