@@ -399,6 +399,7 @@ export default class AntiEphemeralState extends Plugin {
 					);
 					if (state) {
 						// Integrity check with mtime if Lock Mode is enabled and timestamp is present
+						let integrityMismatch = false;
 						if (
 							this.settings.lockModeEnabled !== false &&
 							this.checksumIntegrity &&
@@ -411,11 +412,11 @@ export default class AntiEphemeralState extends Plugin {
 										state.timestamp
 									);
 								if (!ok) {
+									integrityMismatch = true;
 									console.warn(
 										"[AES] Integrity mismatch detected for",
 										file.path
 									);
-									// Non-UI flagging for now; visual indication will be added in a later step.
 								}
 							} catch (e) {
 								console.error(
@@ -425,11 +426,14 @@ export default class AntiEphemeralState extends Plugin {
 							}
 						}
 
-						// Update lock icon according to saved state
+						// Update lock icon according to saved state and integrity
 						if (this.lockStatusBar) {
-							this.lockStatusBar.updateIcon(
-								state.protected ? "locked" : "unlocked"
-							);
+							const iconState = integrityMismatch
+								? "corrupted"
+								: state.protected
+									? "locked"
+									: "unlocked";
+							this.lockStatusBar.updateIcon(iconState);
 						}
 						console.log(
 							"[AES] Attempting to restore position:",
@@ -1273,7 +1277,7 @@ class SettingTab extends PluginSettingTab {
 class LockStatusBar {
 	private plugin: AntiEphemeralState;
 	private el: HTMLElement;
-	private state: "unlocked" | "locked" = "unlocked";
+	private state: "unlocked" | "locked" | "corrupted" = "unlocked";
 
 	constructor(plugin: AntiEphemeralState) {
 		this.plugin = plugin;
@@ -1285,15 +1289,24 @@ class LockStatusBar {
 	}
 
 	// Update visual icon and tooltip
-	updateIcon(state: "unlocked" | "locked"): void {
+	updateIcon(state: "unlocked" | "locked" | "corrupted"): void {
 		this.state = state;
 		// Use simple emoji icons; can be replaced with Obsidian icons later
-		if (state === "locked") {
-			this.el.textContent = "🔒";
-			this.el.setAttribute("title", "Click to unlock document");
-		} else {
-			this.el.textContent = "🔓";
-			this.el.setAttribute("title", "Click to lock document");
+		switch (state) {
+			case "locked":
+				this.el.textContent = "🔒";
+				this.el.setAttribute("title", "Click to unlock document");
+				break;
+			case "corrupted":
+				this.el.textContent = "⚠️";
+				this.el.setAttribute(
+					"title",
+					"File content was modified externally"
+				);
+				break;
+			default:
+				this.el.textContent = "🔓";
+				this.el.setAttribute("title", "Click to lock document");
 		}
 	}
 
@@ -1335,6 +1348,12 @@ class ChecksumIntegrity {
 		expectedTimestamp: number
 	): Promise<boolean> {
 		const current = await this.getFileTimestamp(filePath);
+		// Debug: log both timestamps for troubleshooting mtime caching/mismatch
+		console.log("[AES] Integrity mtime match check:", {
+			filePath,
+			apiTimestamp: current,
+			stateTimestamp: expectedTimestamp,
+		});
 		return current === expectedTimestamp;
 	}
 }
