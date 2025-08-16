@@ -1429,6 +1429,9 @@ class LockManager {
 
 		// Re-apply only cursor/scroll to avoid UX jumps
 		this.plugin.setTemporaryState(toRestore);
+
+		// Inform user about automatic enforcement of Lock Mode
+		new Notice("Lock Mode enabled", 3000);
 	}
 }
 
