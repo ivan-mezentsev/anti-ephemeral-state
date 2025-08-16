@@ -12,6 +12,10 @@ export class Keymap {
 	static isModEvent(_evt?: UserEvent | null): boolean {
 		return false;
 	}
+
+	// Added to align with Obsidian API structural type
+	pushScope(_scope: Scope): void {}
+	popScope(_scope: Scope): void {}
 }
 
 export class Scope {
