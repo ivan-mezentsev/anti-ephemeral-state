@@ -333,6 +333,7 @@ export default class AntiEphemeralState extends Plugin {
 		this.DEFAULT_SETTINGS = {
 			dbDir:
 				this.app.vault.configDir + "/plugins/anti-ephemeral-state/db",
+			lockModeEnabled: true,
 		};
 
 		await this.loadSettings();

@@ -1,20 +1,65 @@
-// Extended Mock for Obsidian API based on references/obsidian-ai-actions
+// Extended Mock for Obsidian API based on official TypeScript API documentation
 // with additional support for configDir and comprehensive testing utilities
 
+// Types alignment with real Obsidian API for cross-compatibility in tests
+// Note: We only import types; runtime is provided by this mock module via Jest mapper
+export type ObsidianTAbstractFile = import("obsidian").TAbstractFile;
+export type MockManifest = import("obsidian").PluginManifest;
+
+// Minimal Keymap & Scope types per docs
+export class Keymap {
+	// Minimal stub; tests don't rely on behavior
+	static isModEvent(_evt?: UserEvent | null): boolean {
+		return false;
+	}
+}
+
+export class Scope {
+	constructor(_parent?: Scope) {}
+}
+
+// Minimal DataAdapter based on docs
+export interface DataAdapter {
+	read(path: string): Promise<string>;
+	write(path: string, data: string): Promise<void>;
+	exists(path: string): Promise<boolean>;
+	mkdir(path: string): Promise<void>;
+	remove(path: string): Promise<void>;
+	rename(oldPath: string, newPath: string): Promise<void>;
+	stat(path: string): Promise<{ mtime: number } | null>;
+	list(path: string): Promise<{ files: string[]; folders: string[] }>;
+}
+
 export interface MockApp {
-	vault: MockVault;
+	vault: Vault | MockVault;
 	workspace: MockWorkspace;
+	keymap: Keymap;
+	scope: Scope;
+	metadataCache: unknown;
+	fileManager: unknown;
+	lastOpenFiles: unknown;
+	dragManager: unknown;
+	plugins: unknown;
+	lastEvent: unknown;
+	loadLocalStorage: () => Promise<unknown>;
+	saveLocalStorage: () => Promise<void>;
 }
 
-export interface MockManifest {
-	id: string;
-	name: string;
-	version: string;
-	author: string;
-	minAppVersion: string;
+// Keep local shape for manifest creation in tests (compatible superset of PluginManifest)
+// (We rely on structural typing; runtime object will include at least required fields.)
+// The helper functions below will populate these fields appropriately.
+
+// Mock FileStats interface
+export interface FileStats {
+	ctime: number;
+	mtime: number;
+	size: number;
 }
 
-export class MockVaultAdapter {
+// Mock UserEvent type
+export type UserEvent = any;
+
+export class MockVaultAdapter implements DataAdapter {
 	private files: Map<string, string> = new Map();
 	private directories: Set<string> = new Set();
 	private mtimes: Map<string, number> = new Map();
@@ -136,7 +181,7 @@ export class MockVaultAdapter {
 }
 
 export class MockVault {
-	adapter: MockVaultAdapter;
+	adapter: DataAdapter;
 	configDir: string;
 	private listeners: Map<string, ((...args: unknown[]) => void)[]> =
 		new Map();
@@ -169,9 +214,8 @@ export class MockVault {
 	}
 
 	getAbstractFileByPath(path: string): TAbstractFile | null {
-		return this.adapter.getAllFiles().includes(path)
-			? new TFile(path)
-			: null;
+		const adapter = this.adapter as MockVaultAdapter;
+		return adapter.getAllFiles().includes(path) ? new TFile(path) : null;
 	}
 
 	// Event system
@@ -505,9 +549,12 @@ export class TFile {
 	basename: string;
 	extension: string;
 	parent: TFolder | null = null;
-	vault: MockVault | null = null;
+	vault: Vault; // Changed from MockVault | null to Vault
 
-	constructor(public path: string) {
+	constructor(
+		public path: string,
+		vault?: Vault
+	) {
 		const parts = path.split("/");
 		this.name = parts[parts.length - 1];
 		const dotIndex = this.name.lastIndexOf(".");
@@ -518,6 +565,9 @@ export class TFile {
 			this.basename = this.name;
 			this.extension = "";
 		}
+
+		// Create a default vault if none provided
+		this.vault = vault || new Vault();
 	}
 }
 
@@ -525,7 +575,7 @@ export class TFolder {
 	children: TAbstractFile[] = [];
 
 	constructor(
-		public vault: MockVault,
+		public vault: Vault, // Changed from MockVault
 		public path: string,
 		public name: string,
 		public parent: TFolder | null = null
@@ -543,6 +593,35 @@ export class Vault {
 		this.adapter = new MockVaultAdapter();
 	}
 
+	// Core Vault methods
+	getName(): string {
+		return "test-vault";
+	}
+
+	async getFileByPath(path: string): Promise<TFile | null> {
+		// Mock implementation - check if file exists via adapter
+		try {
+			const exists = await this.adapter.exists(path);
+			if (exists) {
+				return new TFile(path, this);
+			}
+		} catch {
+			// File doesn't exist
+		}
+		return null;
+	}
+
+	getFolderByPath(path: string): TFolder | null {
+		// Mock implementation
+		return null;
+	}
+
+	getAbstractFileByPath(path: string): TAbstractFile | null {
+		// Mock implementation - synchronous version
+		return new TFile(path, this);
+	}
+
+	// File operations
 	async read(file: TFile): Promise<string> {
 		return this.adapter.read(file.path);
 	}
@@ -561,9 +640,22 @@ export class Vault {
 	}
 }
 
-export class App {
+export class App implements MockApp {
 	vault: MockVault;
 	workspace: MockWorkspace;
+
+	// Additional properties to match Obsidian API
+	keymap: Keymap = new Keymap();
+	scope: Scope = new Scope();
+	metadataCache: unknown = {};
+	fileManager: unknown = {};
+	lastOpenFiles: unknown = {};
+	dragManager: unknown = {};
+	plugins: unknown = {};
+	lastEvent: unknown = {};
+
+	loadLocalStorage: () => Promise<unknown> = async () => ({});
+	saveLocalStorage: () => Promise<void> = async () => {};
 
 	constructor(configDir = "/test/.obsidian") {
 		this.vault = new MockVault(configDir);
@@ -721,12 +813,13 @@ export class TestUtils {
 			version: "1.0.0",
 			author: "Test Author",
 			minAppVersion: "0.15.0",
+			description: "Test plugin manifest",
 			...overrides,
-		};
+		} as MockManifest;
 	}
 
 	static createMockPlugin(app?: MockApp, manifest?: MockManifest): Plugin {
-		const mockApp = app || TestUtils.createMockApp();
+		const mockApp: MockApp = app || TestUtils.createMockApp();
 		const mockManifest = manifest || TestUtils.createMockManifest();
 		return new Plugin(mockApp, mockManifest);
 	}

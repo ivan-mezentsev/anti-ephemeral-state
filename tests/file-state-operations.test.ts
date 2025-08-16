@@ -36,12 +36,32 @@ describe("AntiEphemeralState File State Operations", () => {
 
 		mockVault = app.vault as MockVault;
 
-		// Initialize plugin settings
+		// Initialize plugin settings with lock mode enabled by default
 		plugin.DEFAULT_SETTINGS = {
 			dbDir: "/test/.obsidian/plugins/anti-ephemeral-state/db",
+			lockModeEnabled: true,
 		};
 		plugin.settings = { ...plugin.DEFAULT_SETTINGS };
 	});
+
+	afterEach(() => {
+		// Clean up mock file system
+		if (mockVault?.adapter) {
+			mockVault.adapter.reset();
+		}
+	});
+
+	/**
+	 * Helper function to create expected state with Lock Mode defaults
+	 * This ensures tests account for the backward-compatible fields that are automatically added
+	 */
+	const withLockDefaults = (state: Record<string, unknown>) => {
+		return {
+			...state,
+			protected: false,
+			timestamp: null,
+		};
+	};
 
 	afterEach(() => {
 		// Clean up mock file system
@@ -59,7 +79,7 @@ describe("AntiEphemeralState File State Operations", () => {
 
 		it("should read valid state from existing file", async () => {
 			const filePath = "test/example.md";
-			const expectedState = {
+			const baseState = {
 				cursor: {
 					start: { col: 0, line: 0 },
 					end: { col: 5, line: 2 },
@@ -76,11 +96,12 @@ describe("AntiEphemeralState File State Operations", () => {
 			const dbFilePath = plugin.getDbFilePath(filePath);
 			await mockVault.adapter.write(
 				dbFilePath,
-				JSON.stringify(expectedState)
+				JSON.stringify(baseState)
 			);
 
 			const result = await plugin.readFileState(filePath);
-			expect(result).toEqual(expectedState);
+			// Expect result to include Lock Mode defaults
+			expect(result).toEqual(withLockDefaults(baseState));
 		});
 
 		it("should handle invalid JSON gracefully", async () => {
@@ -173,7 +194,7 @@ describe("AntiEphemeralState File State Operations", () => {
 
 		it("should handle state with missing viewState", async () => {
 			const filePath = "test/no-viewstate.md";
-			const state = {
+			const baseState = {
 				cursor: {
 					start: { col: 0, line: 0 },
 					end: { col: 5, line: 2 },
@@ -182,10 +203,13 @@ describe("AntiEphemeralState File State Operations", () => {
 			};
 
 			const dbFilePath = plugin.getDbFilePath(filePath);
-			await mockVault.adapter.write(dbFilePath, JSON.stringify(state));
+			await mockVault.adapter.write(
+				dbFilePath,
+				JSON.stringify(baseState)
+			);
 
 			const result = await plugin.readFileState(filePath);
-			expect(result).toEqual(state);
+			expect(result).toEqual(withLockDefaults(baseState));
 		});
 
 		it("should handle empty state file", async () => {
@@ -195,7 +219,7 @@ describe("AntiEphemeralState File State Operations", () => {
 			await mockVault.adapter.write(dbFilePath, "{}");
 
 			const result = await plugin.readFileState(filePath);
-			expect(result).toEqual({});
+			expect(result).toEqual(withLockDefaults({}));
 		});
 	});
 
@@ -222,7 +246,8 @@ describe("AntiEphemeralState File State Operations", () => {
 
 			const savedContent = await mockVault.adapter.read(dbFilePath);
 			const savedState = JSON.parse(savedContent);
-			expect(savedState).toEqual(state);
+			// writeFileState automatically adds Lock Mode defaults
+			expect(savedState).toEqual(withLockDefaults(state));
 		});
 
 		it("should create database directory if it doesn't exist", async () => {
@@ -305,7 +330,7 @@ describe("AntiEphemeralState File State Operations", () => {
 			const dbFilePath = plugin.getDbFilePath(filePath);
 			const savedContent = await mockVault.adapter.read(dbFilePath);
 			const savedState = JSON.parse(savedContent);
-			expect(savedState).toEqual(state);
+			expect(savedState).toEqual(withLockDefaults(state));
 		});
 
 		it("should handle state with special characters in file path", async () => {
@@ -324,7 +349,7 @@ describe("AntiEphemeralState File State Operations", () => {
 
 			const savedContent = await mockVault.adapter.read(dbFilePath);
 			const savedState = JSON.parse(savedContent);
-			expect(savedState).toEqual(state);
+			expect(savedState).toEqual(withLockDefaults(state));
 		});
 
 		it("should overwrite existing state file", async () => {
@@ -353,7 +378,7 @@ describe("AntiEphemeralState File State Operations", () => {
 			const dbFilePath = plugin.getDbFilePath(filePath);
 			const savedContent = await mockVault.adapter.read(dbFilePath);
 			const savedState = JSON.parse(savedContent);
-			expect(savedState).toEqual(newState);
+			expect(savedState).toEqual(withLockDefaults(newState));
 		});
 	});
 
