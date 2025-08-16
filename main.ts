@@ -33,6 +33,10 @@ interface TemporaryState {
 	};
 	scroll?: number;
 	viewState?: ViewState; // Store the complete view state from getState()
+	// Lock Mode fields (backward-compatible)
+	// When missing, defaults are applied during read/write: protected=false, timestamp=null
+	protected?: boolean; // whether note is protected from edits
+	timestamp?: number | null; // file mtime in ms; null when unknown
 }
 
 /** Minimal shape we rely on from persisted JSON */
@@ -119,13 +123,35 @@ export default class AntiEphemeralState extends Plugin {
 
 				const parsedData = JSON.parse(data);
 
+				// Ensure Lock Mode fields have defaults for backward compatibility
+				const ensureLockDefaults = (obj: unknown): boolean => {
+					if (!isObject(obj)) return false;
+					let changed = false;
+					const rec = obj as Record<string, unknown>;
+					if (typeof rec.protected !== "boolean") {
+						rec.protected = false;
+						changed = true;
+					}
+					const ts = rec.timestamp;
+					if (
+						ts === undefined ||
+						(typeof ts !== "number" && ts !== null)
+					) {
+						rec.timestamp = null;
+						changed = true;
+					}
+					return changed;
+				};
+
+				let changedDefaults = ensureLockDefaults(parsedData);
+
 				// Validate viewState.file field
 				if (!validateViewStateFile(parsedData, filePath)) {
 					// Update the invalid viewState.file field immediately
 					if (parsedData.viewState) {
 						parsedData.viewState.file = filePath;
 					}
-					// Save the corrected data back to the file
+					// Save the corrected data back to the file (also persists defaults)
 					await this.app.vault.adapter.write(
 						dbFilePath,
 						JSON.stringify(parsedData)
@@ -139,6 +165,13 @@ export default class AntiEphemeralState extends Plugin {
 						"span.is-flashing"
 					);
 				if (!containsFlashingSpan) {
+					// Persist defaults if they were added and file path was valid
+					if (changedDefaults) {
+						await this.app.vault.adapter.write(
+							dbFilePath,
+							JSON.stringify(parsedData)
+						);
+					}
 					return parsedData;
 				} else {
 					return null;
@@ -163,9 +196,19 @@ export default class AntiEphemeralState extends Plugin {
 				await this.app.vault.adapter.mkdir(this.settings.dbDir);
 			}
 
+			// Apply defaults for new fields before saving (non-destructive merge)
+			const stateToSave: TemporaryState = { ...state };
+			if (typeof stateToSave.protected !== "boolean") {
+				stateToSave.protected = false;
+			}
+			const ts = stateToSave.timestamp;
+			if (ts === undefined || (typeof ts !== "number" && ts !== null)) {
+				stateToSave.timestamp = null;
+			}
+
 			await this.app.vault.adapter.write(
 				dbFilePath,
-				JSON.stringify(state)
+				JSON.stringify(stateToSave)
 			);
 			console.log("[AES] State saved to database file:", dbFilePath);
 		} catch (e) {
