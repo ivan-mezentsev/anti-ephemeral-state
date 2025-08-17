@@ -72,6 +72,9 @@ export default class AntiEphemeralState extends Plugin {
 	private lockStatusBar?: LockStatusBar; // status bar controller when Lock Mode enabled
 	private checksumIntegrity?: ChecksumIntegrity; // integrity helper
 	lockManager?: LockManager; // lock manager controller
+	// Command registration state for Lock Mode toggle
+	private lockCommandId = "lock-unlock";
+	private lockCommandRegistered = false;
 
 	// Improved hash function for file names with better collision resistance
 	getFileHash(filePath: string): string {
@@ -359,6 +362,7 @@ export default class AntiEphemeralState extends Plugin {
 			this.lockStatusBar = new LockStatusBar(this);
 			this.checksumIntegrity = new ChecksumIntegrity(this);
 			this.lockManager = new LockManager(this);
+			this.registerLockCommand();
 		}
 
 		this.registerEvent(
@@ -673,6 +677,7 @@ export default class AntiEphemeralState extends Plugin {
 		}
 		// Reset scroll listeners flag for clean reload
 		this.scrollListenersAttached = false;
+		this.unregisterLockCommand();
 		// No need for final save since we save immediately
 		super.onunload();
 	}
@@ -1107,6 +1112,7 @@ export default class AntiEphemeralState extends Plugin {
 		if (!this.lockStatusBar) {
 			this.lockStatusBar = new LockStatusBar(this);
 		}
+		this.registerLockCommand();
 	}
 
 	// Disable Lock Mode UI live (remove status bar)
@@ -1114,6 +1120,38 @@ export default class AntiEphemeralState extends Plugin {
 		if (this.lockStatusBar) {
 			this.lockStatusBar.dispose();
 			this.lockStatusBar = undefined;
+		}
+		this.unregisterLockCommand();
+	}
+
+	// Register command to toggle lock state for active file
+	private registerLockCommand(): void {
+		if (this.lockCommandRegistered) return;
+		try {
+			this.addCommand({
+				id: this.lockCommandId,
+				name: "Lock/Unlock",
+				callback: async () => {
+					const filePath = this.app.workspace.getActiveFile()?.path;
+					if (!filePath) return;
+					await this.lockManager?.toggleLockState(filePath);
+				},
+			});
+			this.lockCommandRegistered = true;
+		} catch (e) {
+			console.warn("[AES] addCommand failed:", e);
+		}
+	}
+
+	// Unregister the lock toggle command if present
+	private unregisterLockCommand(): void {
+		if (!this.lockCommandRegistered) return;
+		try {
+			this.removeCommand(this.lockCommandId);
+		} catch (e) {
+			console.warn("[AES] removeCommand failed:", e);
+		} finally {
+			this.lockCommandRegistered = false;
 		}
 	}
 
