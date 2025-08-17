@@ -9,6 +9,7 @@ import { App, MockVault, TestUtils, MockManifest } from "./__mocks__/obsidian";
 // Type for plugin settings in tests
 interface TestPluginSettings {
 	dbDir: string;
+	lockModeEnabled?: boolean;
 }
 
 // Type for plugin with mock methods
@@ -138,6 +139,8 @@ describe("AntiEphemeralState Initialization and Settings", () => {
 			expect(plugin.DEFAULT_SETTINGS).toBeDefined();
 			expect(typeof plugin.DEFAULT_SETTINGS).toBe("object");
 			expect(plugin.DEFAULT_SETTINGS).toHaveProperty("dbDir");
+			expect(plugin.DEFAULT_SETTINGS).toHaveProperty("lockModeEnabled");
+			expect(plugin.DEFAULT_SETTINGS.lockModeEnabled).toBe(true);
 		});
 	});
 
@@ -209,6 +212,7 @@ describe("AntiEphemeralState Initialization and Settings", () => {
 		it("should preserve settings data after save-load cycle", async () => {
 			const customSettings: TestPluginSettings = {
 				dbDir: "/preserved/path/db",
+				lockModeEnabled: true,
 			};
 
 			plugin.settings = customSettings;

@@ -37,9 +37,10 @@ describe("AntiEphemeralState File Management", () => {
 
 		mockVault = app.vault as MockVault;
 
-		// Initialize plugin settings
+		// Initialize plugin settings with Lock Mode enabled
 		plugin.DEFAULT_SETTINGS = {
 			dbDir: "/test/.obsidian/plugins/anti-ephemeral-state/db",
+			lockModeEnabled: true,
 		};
 		plugin.settings = { ...plugin.DEFAULT_SETTINGS };
 
@@ -53,6 +54,18 @@ describe("AntiEphemeralState File Management", () => {
 			mockVault.adapter.reset();
 		}
 	});
+
+	/**
+	 * Helper function to create expected state with Lock Mode defaults
+	 * This ensures tests account for the backward-compatible fields that are automatically added
+	 */
+	const withLockDefaults = (state: Record<string, unknown>) => {
+		return {
+			...state,
+			protected: false,
+			timestamp: null,
+		};
+	};
 
 	describe("renameFile", () => {
 		it("should transfer state from old file to new file path", async () => {
@@ -97,7 +110,7 @@ describe("AntiEphemeralState File Management", () => {
 					file: newPath,
 				},
 			};
-			expect(newState).toEqual(expectedState);
+			expect(newState).toEqual(withLockDefaults(expectedState));
 
 			// Verify old state file is removed
 			expect(await mockVault.adapter.exists(oldDbPath)).toBe(false);
@@ -169,7 +182,9 @@ describe("AntiEphemeralState File Management", () => {
 					file: newPath,
 				},
 			};
-			expect(transferredState).toEqual(expectedComplexState);
+			expect(transferredState).toEqual(
+				withLockDefaults(expectedComplexState)
+			);
 
 			// Verify old file is cleaned up
 			const oldDbPath = plugin.getDbFilePath(oldPath);
@@ -194,7 +209,7 @@ describe("AntiEphemeralState File Management", () => {
 			await plugin.renameFile(file as TAbstractFile, oldPath);
 
 			const newState = await plugin.readFileState(newPath);
-			expect(newState).toEqual(state);
+			expect(newState).toEqual(withLockDefaults(state));
 
 			// Verify cleanup
 			const oldDbPath = plugin.getDbFilePath(oldPath);
@@ -254,7 +269,7 @@ describe("AntiEphemeralState File Management", () => {
 
 			// Verify new file was still created despite cleanup error
 			const newState = await plugin.readFileState(newPath);
-			expect(newState).toEqual(state);
+			expect(newState).toEqual(withLockDefaults(state));
 
 			// Restore original method
 			mockVault.adapter.remove = originalRemove;
@@ -272,7 +287,7 @@ describe("AntiEphemeralState File Management", () => {
 			await plugin.renameFile(file as TAbstractFile, oldPath);
 
 			const newState = await plugin.readFileState(newPath);
-			expect(newState).toEqual(emptyState);
+			expect(newState).toEqual(withLockDefaults(emptyState));
 		});
 
 		it("should handle very long file paths", async () => {
@@ -293,7 +308,7 @@ describe("AntiEphemeralState File Management", () => {
 			await plugin.renameFile(file as TAbstractFile, oldPath);
 
 			const newState = await plugin.readFileState(newPath);
-			expect(newState).toEqual(state);
+			expect(newState).toEqual(withLockDefaults(state));
 		});
 	});
 
@@ -480,7 +495,7 @@ describe("AntiEphemeralState File Management", () => {
 
 			// Verify second file's state is intact
 			const remainingState = await plugin.readFileState(filePath2);
-			expect(remainingState).toEqual(state2);
+			expect(remainingState).toEqual(withLockDefaults(state2));
 		});
 
 		it("should handle very long file paths during deletion", async () => {
@@ -538,7 +553,7 @@ describe("AntiEphemeralState File Management", () => {
 
 			// Verify state transferred
 			const transferredState = await plugin.readFileState(renamedPath);
-			expect(transferredState).toEqual(state);
+			expect(transferredState).toEqual(withLockDefaults(state));
 
 			// Delete renamed file
 			await plugin.deleteFile(file as TAbstractFile);

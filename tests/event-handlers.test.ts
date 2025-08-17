@@ -46,6 +46,9 @@ describe("AntiEphemeralState Event Handlers", () => {
 		// Initialize plugin to set up DEFAULT_SETTINGS
 		await plugin.onload();
 
+		// Disable Lock Mode for cleaner event handler testing
+		plugin.settings.lockModeEnabled = false;
+
 		// Create mock file and view
 		mockFile = TestUtils.createMockFile("test.md");
 		mockView = new MarkdownView(mockFile);
@@ -663,7 +666,7 @@ describe("AntiEphemeralState Event Handlers", () => {
 	});
 
 	describe("checkTemporaryStateChanged", () => {
-		it("should use requestAnimationFrame for state checking", () => {
+		it("should use requestAnimationFrame for state checking", async () => {
 			// Setup plugin state to allow performStateCheck to run
 			plugin.lastLoadedFileName = mockFile.path;
 			plugin.loadingFile = false;
@@ -758,7 +761,7 @@ describe("AntiEphemeralState Event Handlers", () => {
 			jest.advanceTimersByTime(0);
 		});
 
-		it("should handle rapid event firing without excessive saves", () => {
+		it("should handle rapid event firing without excessive saves", async () => {
 			const mockState = {
 				cursor: {
 					start: { col: 0, line: 0 },
