@@ -1492,7 +1492,7 @@ class LockManager {
 		this.plugin.setTemporaryState(toRestore);
 
 		// Inform user about automatic enforcement of Lock Mode
-		new Notice("Lock Mode enabled", 3000);
+		new Notice("Lock Mode enabled", 1000);
 	}
 }
 
