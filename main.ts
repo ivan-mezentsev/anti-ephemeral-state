@@ -1295,18 +1295,18 @@ class LockStatusBar {
 		// Use simple emoji icons; can be replaced with Obsidian icons later
 		switch (state) {
 			case "locked":
-				this.el.textContent = "🔒";
+				this.el.textContent = "●";
 				this.el.setAttribute("title", "Click to unlock document");
 				break;
 			case "corrupted":
-				this.el.textContent = "⚠️";
+				this.el.textContent = "✖";
 				this.el.setAttribute(
 					"title",
 					"File content was modified externally"
 				);
 				break;
 			default:
-				this.el.textContent = "🔓";
+				this.el.textContent = "○";
 				this.el.setAttribute("title", "Click to lock document");
 		}
 	}

@@ -15,7 +15,7 @@ import {
 	afterEach,
 	jest,
 } from "@jest/globals";
-import AntiEphemeralState from "../main.js";
+import AntiEphemeralState from "../main";
 import {
 	App,
 	MockVault,
@@ -132,19 +132,19 @@ describe("Lock Mode – Integration", () => {
 		await plugin.delay(10);
 		await mockVault.adapter.write(file.path, "# Modified externally");
 
-		// Trigger another open/layout to detect mismatch and set ⚠️ icon
+		// Trigger another open/layout to detect mismatch and set ✖ icon
 		app.workspace.trigger("file-open", file);
 		await plugin.delay(0);
 		app.workspace.trigger("layout-change");
 		await plugin.delay(0);
 
-		// Status bar should reflect corrupted state (⚠️)
+		// Status bar should reflect corrupted state (✖)
 		expect(statusBarEl).not.toBeNull();
 		app.workspace.trigger("file-open", file);
 		await plugin.delay(0);
 		app.workspace.trigger("layout-change");
 		await plugin.delay(0);
-		expect(statusBarEl?.textContent).toBe("⚠️");
+		expect(statusBarEl?.textContent).toBe("✖");
 
 		// Unlock to restore editable state (timestamp should null out)
 		await plugin.lockManager!.toggleLockState(file.path);
