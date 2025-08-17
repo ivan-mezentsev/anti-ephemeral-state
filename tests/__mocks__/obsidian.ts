@@ -672,6 +672,26 @@ export class App implements MockApp {
 	}
 }
 
+// Tooltip types & helpers (subset of real API)
+export type TooltipPlacement = "bottom" | "right" | "left" | "top";
+export interface TooltipOptions {
+	placement?: TooltipPlacement;
+	delay?: number;
+	gap?: number;
+	classes?: string[];
+}
+
+// No-op setTooltip for tests; attaches data attributes for potential assertions
+export function setTooltip(
+	el: HTMLElement,
+	tooltip: string,
+	options?: TooltipOptions
+): void {
+	// Simulate Obsidian tooltip behavior by storing values on dataset
+	(el as any)._tooltipText = tooltip;
+	(el as any)._tooltipOptions = options || {};
+}
+
 // Mock view state interfaces
 export interface ViewState {
 	type: string;

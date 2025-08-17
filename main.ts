@@ -8,6 +8,7 @@ import {
 	Editor,
 	debounce,
 	Notice,
+	setTooltip,
 } from "obsidian";
 
 import type { ViewState, Debouncer } from "obsidian";
@@ -1284,7 +1285,6 @@ class LockStatusBar {
 		this.plugin = plugin;
 		this.el = this.plugin.addStatusBarItem();
 		this.el.classList.add("aes-lock-status");
-		this.el.setAttribute("aria-label", "Lock mode status");
 		this.el.addEventListener("click", () => this.onClick());
 		this.updateIcon(this.state);
 	}
@@ -1293,22 +1293,25 @@ class LockStatusBar {
 	updateIcon(state: "unlocked" | "locked" | "corrupted"): void {
 		this.state = state;
 		// Use simple emoji icons; can be replaced with Obsidian icons later
+		let tooltip: string;
 		switch (state) {
 			case "locked":
 				this.el.textContent = "●";
-				this.el.setAttribute("title", "Click to unlock document");
+				tooltip = "Locked";
 				break;
 			case "corrupted":
 				this.el.textContent = "✖";
-				this.el.setAttribute(
-					"title",
-					"File content was modified externally"
-				);
+				tooltip = "Modified externally";
 				break;
 			default:
 				this.el.textContent = "○";
-				this.el.setAttribute("title", "Click to lock document");
+				tooltip = "Unlocked";
 		}
+
+		// Apply Obsidian tooltip (black) with proper placement; avoid native duplicates
+		this.el.removeAttribute("title");
+		this.el.removeAttribute("aria-label");
+		setTooltip(this.el, tooltip, { placement: "top", gap: 6 });
 	}
 
 	private async onClick(): Promise<void> {
