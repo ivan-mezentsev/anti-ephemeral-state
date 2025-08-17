@@ -346,6 +346,11 @@ export class Plugin {
 	app: MockApp;
 	manifest: MockManifest;
 	private settings: Record<string, unknown> = {};
+	// Track registered commands for tests
+	private __commands: Map<
+		string,
+		{ id: string; name: string; callback?: () => void | Promise<void> }
+	> = new Map();
 
 	constructor(app: MockApp, manifest: MockManifest) {
 		this.app = app;
@@ -355,7 +360,37 @@ export class Plugin {
 	onload(): void {}
 	onunload(): void {}
 
-	addCommand(): void {}
+	addCommand(cmd: {
+		id: string;
+		name: string;
+		callback?: () => void | Promise<void>;
+	}): void {
+		this.__commands.set(cmd.id, cmd);
+	}
+
+	removeCommand(id: string): void {
+		// Support both plain id and fully-qualified id "pluginId:id"
+		if (this.__commands.has(id)) {
+			this.__commands.delete(id);
+			return;
+		}
+		const parts = id.split(":");
+		if (parts.length === 2) {
+			const plain = parts[1]!
+				// normalize
+				.trim();
+			this.__commands.delete(plain);
+		}
+	}
+
+	// Test helpers
+	getCommand(
+		id: string
+	):
+		| { id: string; name: string; callback?: () => void | Promise<void> }
+		| undefined {
+		return this.__commands.get(id);
+	}
 	addSettingTab(): void {}
 	addStatusBarItem(): HTMLElement {
 		// Create a simple DOM element to simulate Obsidian status bar item
