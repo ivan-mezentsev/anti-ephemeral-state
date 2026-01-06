@@ -1130,7 +1130,7 @@ export default class AntiEphemeralState extends Plugin {
 		try {
 			this.addCommand({
 				id: this.lockCommandId,
-				name: "Lock/Unlock",
+				name: "Lock/unlock",
 				callback: async () => {
 					const filePath = this.app.workspace.getActiveFile()?.path;
 					if (!filePath) return;
@@ -1271,7 +1271,7 @@ class SettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Validation of database")
+			.setName("Database validation")
 			.setDesc(
 				"Iterate over database entries, fix wrong viewState.file, and remove entries for missing notes"
 			)
@@ -1286,9 +1286,9 @@ class SettingTab extends PluginSettingTab {
 
 		// Toggle to enable/disable Lock Mode
 		new Setting(containerEl)
-			.setName("Enable Lock Mode")
+			.setName("Enable lock mode")
 			.setDesc(
-				"Show Lock Mode UI and enforce read-only for protected notes"
+				"Show lock mode UI and enforce read-only for protected notes"
 			)
 			.addToggle(toggle =>
 				toggle
@@ -1492,7 +1492,7 @@ class LockManager {
 		this.plugin.setTemporaryState(toRestore);
 
 		// Inform user about automatic enforcement of Lock Mode
-		new Notice("Lock Mode enabled", 1000);
+		new Notice("Lock mode enabled", 1000);
 	}
 }
 
