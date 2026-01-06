@@ -25,3 +25,7 @@ global.globalThis.fetch = global.fetch;
 
 // Use real timers for setup
 jest.useRealTimers();
+
+// Obsidian API provides a global sleep(ms): Promise<void> helper.
+// Provide it for tests running outside of Obsidian.
+global.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

@@ -17,6 +17,7 @@ export default [
 				console: "readonly",
 				document: "readonly",
 				window: "readonly",
+				sleep: "readonly",
 				HTMLElement: "readonly",
 				HTMLInputElement: "readonly",
 				KeyboardEvent: "readonly",

@@ -1183,7 +1183,7 @@ export default class AntiEphemeralState extends Plugin {
 	}
 
 	async delay(ms: number) {
-		return new Promise(resolve => setTimeout(resolve, ms));
+		return sleep(ms);
 	}
 
 	// Verify scroll position and retry if needed
