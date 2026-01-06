@@ -366,7 +366,7 @@ export default class AntiEphemeralState extends Plugin {
 		}
 
 		this.registerEvent(
-			this.app.workspace.on("file-open", async file => {
+			this.app.workspace.on("file-open", file => {
 				if (!file) return;
 
 				this.loadingFile = true;
@@ -482,13 +482,15 @@ export default class AntiEphemeralState extends Plugin {
 		// No need for quit handler since we save immediately
 
 		this.registerEvent(
-			this.app.vault.on("rename", (file, oldPath) =>
-				this.renameFile(file, oldPath)
-			)
+			this.app.vault.on("rename", (file, oldPath) => {
+				void this.renameFile(file, oldPath);
+			})
 		);
 
 		this.registerEvent(
-			this.app.vault.on("delete", file => this.deleteFile(file))
+			this.app.vault.on("delete", file => {
+				void this.deleteFile(file);
+			})
 		);
 
 		// Event-driven approach: listen to editor changes
@@ -514,13 +516,13 @@ export default class AntiEphemeralState extends Plugin {
 		// Initialize debounced save function using Obsidian's debounce
 		this.debouncedSave = debounce(
 			(filePath: string, state: TemporaryState) => {
-				this.writeFileState(filePath, state);
+				void this.writeFileState(filePath, state);
 			},
 			DELAY_WRITING_DB,
 			true
 		);
 
-		this.restoreTemporaryState();
+		void this.restoreTemporaryState();
 	}
 
 	async renameFile(file: TAbstractFile, oldPath: string) {
@@ -683,26 +685,28 @@ export default class AntiEphemeralState extends Plugin {
 	}
 
 	checkTemporaryStateChanged() {
-		requestAnimationFrame(async () => {
-			// Wait for any ongoing restoration to complete
-			if (this.restorationPromise) {
-				await this.restorationPromise;
-			}
-			// Minimal lock-mode enforcement hook before we compute/save state
-			const activePath = this.app.workspace.getActiveFile()?.path;
-			if (
-				activePath &&
-				this.settings.lockModeEnabled !== false &&
-				this.lockManager
-			) {
-				try {
-					await this.lockManager.enforceReadOnlyMode(activePath);
-				} catch (e) {
-					console.warn("[AES] enforceReadOnlyMode failed:", e);
+		requestAnimationFrame(() => {
+			void (async () => {
+				// Wait for any ongoing restoration to complete
+				if (this.restorationPromise) {
+					await this.restorationPromise;
 				}
-			}
+				// Minimal lock-mode enforcement hook before we compute/save state
+				const activePath = this.app.workspace.getActiveFile()?.path;
+				if (
+					activePath &&
+					this.settings.lockModeEnabled !== false &&
+					this.lockManager
+				) {
+					try {
+						await this.lockManager.enforceReadOnlyMode(activePath);
+					} catch (e) {
+						console.warn("[AES] enforceReadOnlyMode failed:", e);
+					}
+				}
 
-			this.performStateCheck();
+				this.performStateCheck();
+			})();
 		});
 	}
 
@@ -1052,7 +1056,7 @@ export default class AntiEphemeralState extends Plugin {
 		// Restore view state if it was persisted
 		if (view && state.viewState) {
 			console.log("[AES] Restoring view state:", state.viewState);
-			view.setState(state.viewState, { history: false });
+			void view.setState(state.viewState, { history: false });
 		}
 
 		// Defer cursor and scroll restoration until the layout is fully ready
@@ -1081,7 +1085,13 @@ export default class AntiEphemeralState extends Plugin {
 				requestAnimationFrame(() => {
 					view.setEphemeralState(state);
 					// Verify scroll position was set correctly with retry mechanism
-					this.verifyAndRetryScroll(view, state.scroll!, 0);
+					void this.verifyAndRetryScroll(
+						view,
+						state.scroll!,
+						0
+					).catch(e =>
+						console.warn("[AES] verifyAndRetryScroll failed:", e)
+					);
 				});
 			} else if (!view) {
 				console.log(
@@ -1130,7 +1140,7 @@ export default class AntiEphemeralState extends Plugin {
 		try {
 			this.addCommand({
 				id: this.lockCommandId,
-				name: "Lock/Unlock",
+				name: "Lock/unlock",
 				callback: async () => {
 					const filePath = this.app.workspace.getActiveFile()?.path;
 					if (!filePath) return;
@@ -1271,7 +1281,7 @@ class SettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Validation of database")
+			.setName("Database validation")
 			.setDesc(
 				"Iterate over database entries, fix wrong viewState.file, and remove entries for missing notes"
 			)
@@ -1286,28 +1296,35 @@ class SettingTab extends PluginSettingTab {
 
 		// Toggle to enable/disable Lock Mode
 		new Setting(containerEl)
-			.setName("Enable Lock Mode")
+			.setName("Enable lock mode")
 			.setDesc(
-				"Show Lock Mode UI and enforce read-only for protected notes"
+				"Show lock mode UI and enforce read-only for protected notes"
 			)
 			.addToggle(toggle =>
 				toggle
 					.setValue(this.plugin.settings.lockModeEnabled !== false)
-					.onChange(async value => {
-						this.plugin.settings.lockModeEnabled = value;
-						await this.plugin.saveSettings();
-						if (value) {
-							this.plugin.enableLockMode();
-							// Ensure helpers exist
-							this.plugin.getChecksumIntegrity();
-							if (!this.plugin.lockManager) {
-								this.plugin.lockManager = new LockManager(
-									this.plugin
-								);
+					.onChange(value => {
+						void (async () => {
+							this.plugin.settings.lockModeEnabled = value;
+							await this.plugin.saveSettings();
+							if (value) {
+								this.plugin.enableLockMode();
+								// Ensure helpers exist
+								this.plugin.getChecksumIntegrity();
+								if (!this.plugin.lockManager) {
+									this.plugin.lockManager = new LockManager(
+										this.plugin
+									);
+								}
+							} else {
+								this.plugin.disableLockMode();
 							}
-						} else {
-							this.plugin.disableLockMode();
-						}
+						})().catch(e =>
+							console.warn(
+								"[AES] Failed to toggle lock mode setting:",
+								e
+							)
+						);
 					})
 			);
 	}
@@ -1480,7 +1497,7 @@ class LockManager {
 		};
 
 		// Switch to preview using official API
-		active.setState(
+		await active.setState(
 			{
 				...(active.getState() as Record<string, unknown>),
 				mode: "preview",
@@ -1492,7 +1509,7 @@ class LockManager {
 		this.plugin.setTemporaryState(toRestore);
 
 		// Inform user about automatic enforcement of Lock Mode
-		new Notice("Lock Mode enabled", 1000);
+		new Notice("Lock mode enabled", 1000);
 	}
 }
 
