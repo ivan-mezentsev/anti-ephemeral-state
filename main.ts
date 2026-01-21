@@ -52,10 +52,10 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 function isParsedStateMinimal(v: unknown): v is ParsedStateMinimal {
 	if (!isObject(v)) return false;
-	const vs = (v as Record<string, unknown>).viewState;
+	const vs = v.viewState;
 	if (vs === undefined) return true; // viewState is optional
 	if (!isObject(vs)) return false;
-	const file = (vs as Record<string, unknown>).file;
+	const file = vs.file;
 	return file === undefined || typeof file === "string";
 }
 
@@ -127,13 +127,16 @@ export default class AntiEphemeralState extends Plugin {
 					return true;
 				};
 
-				const parsedData = JSON.parse(data);
+				const parsedData = JSON.parse(data) as unknown;
+				if (!isObject(parsedData)) {
+					return null;
+				}
 
 				// Ensure Lock Mode fields have defaults for backward compatibility
 				const ensureLockDefaults = (obj: unknown): boolean => {
 					if (!isObject(obj)) return false;
 					let changed = false;
-					const rec = obj as Record<string, unknown>;
+					const rec = obj;
 					if (typeof rec.protected !== "boolean") {
 						rec.protected = false;
 						changed = true;
@@ -154,8 +157,12 @@ export default class AntiEphemeralState extends Plugin {
 				// Validate viewState.file field
 				if (!validateViewStateFile(parsedData, filePath)) {
 					// Update the invalid viewState.file field immediately
-					if (parsedData.viewState) {
-						parsedData.viewState.file = filePath;
+					if (
+						isParsedStateMinimal(parsedData) &&
+						parsedData.viewState
+					) {
+						(parsedData.viewState as MinimalViewState).file =
+							filePath;
 					}
 					// Save the corrected data back to the file (also persists defaults)
 					await this.app.vault.adapter.write(
@@ -163,7 +170,7 @@ export default class AntiEphemeralState extends Plugin {
 						JSON.stringify(parsedData)
 					);
 					// Return the corrected data
-					return parsedData;
+					return parsedData as TemporaryState;
 				}
 
 				let containsFlashingSpan =
@@ -178,7 +185,7 @@ export default class AntiEphemeralState extends Plugin {
 							JSON.stringify(parsedData)
 						);
 					}
-					return parsedData;
+					return parsedData as TemporaryState;
 				} else {
 					return null;
 				}
@@ -216,7 +223,7 @@ export default class AntiEphemeralState extends Plugin {
 				dbFilePath,
 				JSON.stringify(stateToSave)
 			);
-			console.log("[AES] State saved to database file:", dbFilePath);
+			console.debug("[AES] State saved to database file:", dbFilePath);
 		} catch (e) {
 			console.error("[AES] Error writing file state:", e);
 		}
@@ -234,6 +241,7 @@ export default class AntiEphemeralState extends Plugin {
 		try {
 			// Ensure database directory exists
 			if (!(await this.app.vault.adapter.exists(dbDir))) {
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix in this notice text.
 				new Notice("[AES] Validation: database directory not found");
 				return;
 			}
@@ -319,7 +327,7 @@ export default class AntiEphemeralState extends Plugin {
 			new Notice(
 				`[AES] Validation completed. Total: ${total}, fixed viewState.file: ${fixedViewStatePath}, removed missing notes: ${removedMissingNote}, removed invalid: ${removedInvalidEntry}, errors: ${errors}`
 			);
-			console.log("[AES] Validation report", {
+			console.debug("[AES] Validation report", {
 				total,
 				fixedViewStatePath,
 				removedMissingNote,
@@ -328,6 +336,7 @@ export default class AntiEphemeralState extends Plugin {
 			});
 		} catch (e) {
 			console.error("[AES] Error validating database directory:", e);
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix and multi-sentence notice text.
 			new Notice("[AES] Validation failed. See console.");
 		}
 	}
@@ -346,7 +355,7 @@ export default class AntiEphemeralState extends Plugin {
 		try {
 			if (!(await this.app.vault.adapter.exists(this.settings.dbDir))) {
 				await this.app.vault.adapter.mkdir(this.settings.dbDir);
-				console.log(
+				console.debug(
 					"[AES] Created database directory:",
 					this.settings.dbDir
 				);
@@ -381,7 +390,7 @@ export default class AntiEphemeralState extends Plugin {
 
 					// Only proceed if current file matches the file that triggered the event
 					if (!currentFile || currentFile.path !== file.path) {
-						console.log(
+						console.debug(
 							"[AES] Layout change - file mismatch, expected:",
 							file.path,
 							"current:",
@@ -397,7 +406,7 @@ export default class AntiEphemeralState extends Plugin {
 					}
 
 					const state = await this.readFileState(file.path);
-					console.log(
+					console.debug(
 						"[AES] Layout change detected for file:",
 						file.path,
 						"State found:",
@@ -441,7 +450,7 @@ export default class AntiEphemeralState extends Plugin {
 									: "unlocked";
 							this.lockStatusBar.updateIcon(iconState);
 						}
-						console.log(
+						console.debug(
 							"[AES] Attempting to restore position:",
 							state
 						);
@@ -449,7 +458,7 @@ export default class AntiEphemeralState extends Plugin {
 							await this.app.workspace.revealLeaf(
 								activeLeaf.leaf
 							);
-							console.log(
+							console.debug(
 								"[AES] Calling setTemporaryState directly with state:",
 								state
 							);
@@ -457,7 +466,7 @@ export default class AntiEphemeralState extends Plugin {
 						}
 						this.loadingFile = false;
 					} else {
-						console.log(
+						console.debug(
 							"[AES] No saved state found for file:",
 							file.path
 						);
@@ -548,7 +557,7 @@ export default class AntiEphemeralState extends Plugin {
 			const dbFilePath = this.getDbFilePath(file.path);
 			if (await this.app.vault.adapter.exists(dbFilePath)) {
 				await this.app.vault.adapter.remove(dbFilePath);
-				console.log("[AES] Deleted database file for:", file.path);
+				console.debug("[AES] Deleted database file for:", file.path);
 			}
 		} catch (e) {
 			console.error("[AES] Error deleting file database:", e);
@@ -610,14 +619,14 @@ export default class AntiEphemeralState extends Plugin {
 	attachScrollListeners() {
 		// Prevent multiple attachments
 		if (this.scrollListenersAttached) {
-			console.log("[AES] Scroll listeners already attached, skipping");
+			console.debug("[AES] Scroll listeners already attached, skipping");
 			return;
 		}
 
 		// Find the main workspace container
 		const workspaceEl = document.querySelector(".workspace");
 		if (workspaceEl) {
-			console.log("[AES] Attaching scroll listener to workspace");
+			console.debug("[AES] Attaching scroll listener to workspace");
 			this.registerDomEvent(
 				workspaceEl as HTMLElement,
 				"scroll",
@@ -631,7 +640,7 @@ export default class AntiEphemeralState extends Plugin {
 		// Also listen to scroll events on the main content area
 		const contentEl = document.querySelector(".workspace-leaf-content");
 		if (contentEl) {
-			console.log("[AES] Attaching scroll listener to content area");
+			console.debug("[AES] Attaching scroll listener to content area");
 			this.registerDomEvent(
 				contentEl as HTMLElement,
 				"scroll",
@@ -645,7 +654,7 @@ export default class AntiEphemeralState extends Plugin {
 		// Listen to scroll events on the editor container specifically
 		const editorEl = document.querySelector(".cm-editor");
 		if (editorEl) {
-			console.log("[AES] Attaching scroll listener to editor");
+			console.debug("[AES] Attaching scroll listener to editor");
 			this.registerDomEvent(
 				editorEl as HTMLElement,
 				"scroll",
@@ -668,7 +677,7 @@ export default class AntiEphemeralState extends Plugin {
 
 		// Mark listeners as attached
 		this.scrollListenersAttached = true;
-		console.log("[AES] All scroll listeners attached successfully");
+		console.debug("[AES] All scroll listeners attached successfully");
 	}
 
 	// Override onunload to cleanup
@@ -733,14 +742,14 @@ export default class AntiEphemeralState extends Plugin {
 		};
 
 		if (isEmptyState(state)) {
-			console.log("[AES] Skipping save of empty state");
+			console.debug("[AES] Skipping save of empty state");
 			return;
 		}
 
 		if (!this.lastTemporaryState) this.lastTemporaryState = state;
 
 		if (!this.TemporaryStatesSame(state, this.lastTemporaryState)) {
-			this.saveTemporaryState(state);
+			void this.saveTemporaryState(state);
 			// Update last known state
 			this.lastTemporaryState = state;
 		}
@@ -799,7 +808,7 @@ export default class AntiEphemeralState extends Plugin {
 
 	async saveTemporaryState(state: TemporaryState) {
 		let fileName = this.app.workspace.getActiveFile()?.path;
-		console.log(
+		console.debug(
 			"[AES] saveTemporaryState called, fileName:",
 			fileName,
 			"lastLoadedFileName:",
@@ -807,7 +816,7 @@ export default class AntiEphemeralState extends Plugin {
 		);
 		if (fileName && fileName == this.lastLoadedFileName) {
 			//do not save if file changed or was not loaded
-			console.log(
+			console.debug(
 				"[AES] Saving state for file:",
 				fileName,
 				"State:",
@@ -850,7 +859,7 @@ export default class AntiEphemeralState extends Plugin {
 			// Use debounced save to prevent excessive state file writes
 			this.debouncedSave(fileName, merged);
 		} else {
-			console.log(
+			console.debug(
 				"[AES] Cannot save state - file changed or not loaded properly"
 			);
 		}
@@ -872,6 +881,7 @@ export default class AntiEphemeralState extends Plugin {
 			);
 			// Show user notification about restoration failure
 			new Notice(
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix in this notice text.
 				"[AES] Failed to restore note state. Try reopening the note.",
 				3000
 			);
@@ -892,7 +902,7 @@ export default class AntiEphemeralState extends Plugin {
 				if (!fileName) {
 					if (attempt < maxAttempts) {
 						const delayMs = 10 * Math.pow(2, attempt - 1);
-						console.log(
+						console.debug(
 							`[AES] Attempt ${attempt}/${maxAttempts}: No active file found, retrying in ${delayMs}ms`
 						);
 						await this.delay(delayMs);
@@ -905,7 +915,7 @@ export default class AntiEphemeralState extends Plugin {
 					}
 				}
 
-				console.log(
+				console.debug(
 					`[AES] Attempt ${attempt}/${maxAttempts} - restoreTemporaryState called for file:`,
 					fileName,
 					"loadingFile:",
@@ -920,7 +930,7 @@ export default class AntiEphemeralState extends Plugin {
 					this.lastLoadedFileName == fileName
 				) {
 					//if already started loading
-					console.log("[AES] Already loading this file, skipping");
+					console.debug("[AES] Already loading this file, skipping");
 					return;
 				}
 
@@ -928,7 +938,7 @@ export default class AntiEphemeralState extends Plugin {
 				this.loadingFile = true;
 
 				if (this.lastLoadedFileName != fileName) {
-					console.log(
+					console.debug(
 						"[AES] New file detected, preparing for state load"
 					);
 					this.lastTemporaryState = null;
@@ -938,20 +948,20 @@ export default class AntiEphemeralState extends Plugin {
 
 					if (fileName) {
 						state = await this.readFileState(fileName);
-						console.log(
+						console.debug(
 							"[AES] Found state in database for file:",
 							fileName,
 							"State:",
 							state
 						);
 						if (state) {
-							console.log(
+							console.debug(
 								"[AES] Calling setTemporaryState with:",
 								state
 							);
 							this.setTemporaryState(state);
 						} else {
-							console.log(
+							console.debug(
 								"[AES] No state found in database for file:",
 								fileName
 							);
@@ -959,11 +969,11 @@ export default class AntiEphemeralState extends Plugin {
 					}
 					this.lastTemporaryState = state || null;
 				} else {
-					console.log("[AES] Same file as before, not restoring");
+					console.debug("[AES] Same file as before, not restoring");
 				}
 
 				this.loadingFile = false;
-				console.log(
+				console.debug(
 					`[AES] restoreTemporaryState completed successfully on attempt ${attempt}`
 				);
 				return; // Success, exit retry loop
@@ -974,7 +984,7 @@ export default class AntiEphemeralState extends Plugin {
 				);
 				if (attempt < maxAttempts) {
 					const delayMs = 10 * Math.pow(2, attempt - 1);
-					console.log(`[AES] Retrying in ${delayMs}ms...`);
+					console.debug(`[AES] Retrying in ${delayMs}ms...`);
 					await this.delay(delayMs);
 				} else {
 					// Reset loading state on final failure
@@ -1002,9 +1012,9 @@ export default class AntiEphemeralState extends Plugin {
 				!isNaN(scrollPos)
 			) {
 				state.scroll = Number(scrollPos.toFixed(4));
-				console.log("[AES] Current scroll position:", state.scroll);
+				console.debug("[AES] Current scroll position:", state.scroll);
 			} else {
-				console.log(
+				console.debug(
 					"[AES] Could not get scroll position from view.currentMode"
 				);
 				// Try alternative method using editor scroll info
@@ -1013,14 +1023,14 @@ export default class AntiEphemeralState extends Plugin {
 					const scrollInfo = editor.getScrollInfo();
 					if (scrollInfo && scrollInfo.top) {
 						state.scroll = Number(scrollInfo.top.toFixed(4));
-						console.log(
+						console.debug(
 							"[AES] Got scroll from editor.getScrollInfo():",
 							state.scroll
 						);
 					}
 				}
 			}
-			console.log("[AES] Current view state:", state.viewState);
+			console.debug("[AES] Current view state:", state.viewState);
 		}
 
 		let editor = this.getEditor();
@@ -1046,7 +1056,7 @@ export default class AntiEphemeralState extends Plugin {
 
 	setTemporaryState(state: TemporaryState) {
 		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		console.log(
+		console.debug(
 			"[AES] setTemporaryState called with state:",
 			state,
 			"View found:",
@@ -1055,7 +1065,7 @@ export default class AntiEphemeralState extends Plugin {
 
 		// Restore view state if it was persisted
 		if (view && state.viewState) {
-			console.log("[AES] Restoring view state:", state.viewState);
+			console.debug("[AES] Restoring view state:", state.viewState);
 			void view.setState(state.viewState, { history: false });
 		}
 
@@ -1064,7 +1074,10 @@ export default class AntiEphemeralState extends Plugin {
 			if (state.cursor) {
 				const editor = this.getEditor();
 				if (editor) {
-					console.log("[AES] Setting cursor position:", state.cursor);
+					console.debug(
+						"[AES] Setting cursor position:",
+						state.cursor
+					);
 					const start = {
 						ch: state.cursor.start.col,
 						line: state.cursor.start.line,
@@ -1075,12 +1088,14 @@ export default class AntiEphemeralState extends Plugin {
 					};
 					editor.setSelection(start, end);
 				} else {
-					console.log("[AES] No editor found for cursor positioning");
+					console.debug(
+						"[AES] No editor found for cursor positioning"
+					);
 				}
 			}
 
 			if (view && state.scroll !== undefined) {
-				console.log("[AES] Setting scroll position:", state.scroll);
+				console.debug("[AES] Setting scroll position:", state.scroll);
 				// Use requestAnimationFrame to defer scroll operations and prevent measure loops
 				requestAnimationFrame(() => {
 					view.setEphemeralState(state);
@@ -1094,7 +1109,7 @@ export default class AntiEphemeralState extends Plugin {
 					);
 				});
 			} else if (!view) {
-				console.log(
+				console.debug(
 					"[AES] No MarkdownView found for scroll positioning"
 				);
 			}
@@ -1166,10 +1181,12 @@ export default class AntiEphemeralState extends Plugin {
 	}
 
 	async loadSettings() {
+		const loaded = (await this.loadData()) as unknown;
+		const loadedSettings = isObject(loaded) ? loaded : {};
 		let settings: PluginSettings = Object.assign(
 			{},
 			this.DEFAULT_SETTINGS,
-			await this.loadData()
+			loadedSettings
 		);
 		// Apply default for lockModeEnabled (enabled by default)
 		if (typeof settings.lockModeEnabled !== "boolean") {
@@ -1204,7 +1221,7 @@ export default class AntiEphemeralState extends Plugin {
 			const scrollDifference = Math.abs(currentScroll - targetScroll);
 			const allowedDifference = Math.max(targetScroll * tolerance, 2); // At least 2px tolerance
 
-			console.log(
+			console.debug(
 				"[AES] Scroll verification - Target:",
 				targetScroll,
 				"Current:",
@@ -1216,12 +1233,12 @@ export default class AntiEphemeralState extends Plugin {
 			);
 
 			if (scrollDifference <= allowedDifference) {
-				console.log("[AES] Scroll position verified successfully");
+				console.debug("[AES] Scroll position verified successfully");
 				return;
 			}
 
 			if (attempt < maxAttempts - 1) {
-				console.log(
+				console.debug(
 					`[AES] Scroll position mismatch, retrying (attempt ${attempt + 1}/${maxAttempts})`
 				);
 				// Use requestAnimationFrame to avoid forced reflows
@@ -1239,13 +1256,13 @@ export default class AntiEphemeralState extends Plugin {
 					attempt + 1
 				);
 			} else {
-				console.log(
+				console.debug(
 					"[AES] Scroll position close enough, accepting current position"
 				);
 				// Don't show notification for minor differences
 			}
 		} else {
-			console.log(
+			console.debug(
 				"[AES] Could not get current scroll position for verification"
 			);
 		}
@@ -1283,13 +1300,18 @@ class SettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Database validation")
 			.setDesc(
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Contains the technical field name "viewState.file".
 				"Iterate over database entries, fix wrong viewState.file, and remove entries for missing notes"
 			)
 			.addButton(btn => {
 				btn.setButtonText("Run validation")
 					.setCta()
 					.onClick(async () => {
-						new Notice("[AES] Validation started...", 1000);
+						new Notice(
+							// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix in this notice text.
+							"[AES] Validation started...",
+							1000
+						);
 						await this.plugin.validateDatabase();
 					});
 			});
@@ -1340,7 +1362,11 @@ class LockStatusBar {
 		this.plugin = plugin;
 		this.el = this.plugin.addStatusBarItem();
 		this.el.classList.add("aes-lock-status");
-		this.el.addEventListener("click", () => this.onClick());
+		this.el.addEventListener("click", () => {
+			void this.onClick().catch(e =>
+				console.warn("[AES] Lock toggle failed:", e)
+			);
+		});
 		this.updateIcon(this.state);
 	}
 
@@ -1408,7 +1434,7 @@ class ChecksumIntegrity {
 	): Promise<boolean> {
 		const current = await this.getFileTimestamp(filePath);
 		// Debug: log both timestamps for troubleshooting mtime caching/mismatch
-		console.log("[AES] Integrity mtime match check:", {
+		console.debug("[AES] Integrity mtime match check:", {
 			filePath,
 			apiTimestamp: current,
 			stateTimestamp: expectedTimestamp,
@@ -1484,7 +1510,7 @@ class LockManager {
 		if (!locked) return;
 
 		// Check current mode; if already preview, do nothing
-		const rawState = active.getState() as Record<string, unknown>;
+		const rawState = active.getState();
 		const mode =
 			typeof rawState.mode === "string" ? rawState.mode : undefined;
 		if (mode === "preview") return;
@@ -1499,7 +1525,7 @@ class LockManager {
 		// Switch to preview using official API
 		await active.setState(
 			{
-				...(active.getState() as Record<string, unknown>),
+				...active.getState(),
 				mode: "preview",
 			},
 			{ history: false }

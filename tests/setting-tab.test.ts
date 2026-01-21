@@ -149,8 +149,8 @@ describe("SettingTab", () => {
 
 	afterEach(() => {
 		// Clean up mock file system
-		if (app?.vault && (app.vault as MockVault).adapter) {
-			(app.vault as MockVault).adapter.reset();
+		if (app?.vault && app.vault.adapter) {
+			app.vault.adapter.reset();
 		}
 
 		// Clear DOM

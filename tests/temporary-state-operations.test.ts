@@ -49,8 +49,8 @@ describe("AntiEphemeralState Temporary State Operations", () => {
 		});
 
 		plugin = createPlugin(app, manifest);
-		mockVault = app.vault as MockVault;
-		mockWorkspace = app.workspace as MockWorkspace;
+		mockVault = app.vault;
+		mockWorkspace = app.workspace;
 
 		// Create mock view and editor
 		mockView = new MarkdownView(new TFile("test.md"));

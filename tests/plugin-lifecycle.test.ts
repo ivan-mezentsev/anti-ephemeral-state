@@ -20,14 +20,14 @@ interface PluginWithMockMethods extends AntiEphemeralState {
 }
 
 const createPlugin = (app: App, manifest: MockManifest): AntiEphemeralState => {
-	return new AntiEphemeralState(app as App, manifest as MockManifest);
+	return new AntiEphemeralState(app, manifest);
 };
 
 describe("AntiEphemeralState Plugin Lifecycle", () => {
 	let plugin: AntiEphemeralState;
 	let app: App;
 	let manifest: MockManifest;
-	let consoleSpy: jest.SpiedFunction<typeof console.log>;
+	let consoleSpy: jest.SpiedFunction<typeof console.debug>;
 	let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
 
 	beforeEach(() => {
@@ -41,7 +41,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 		plugin = createPlugin(app, manifest);
 
 		// Setup console spies
-		consoleSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+		consoleSpy = jest.spyOn(console, "debug").mockImplementation(() => {});
 		consoleErrorSpy = jest
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
@@ -49,8 +49,8 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 
 	afterEach(() => {
 		// Clean up mock file system
-		if (app?.vault && (app.vault as MockVault).adapter) {
-			(app.vault as MockVault).adapter.reset();
+		if (app?.vault && app.vault.adapter) {
+			app.vault.adapter.reset();
 		}
 
 		// Restore console methods
@@ -65,7 +65,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 	describe("onload() method", () => {
 		it("should complete full onload lifecycle successfully", async () => {
 			// Ensure database directory doesn't exist initially
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 			const expectedDbDir =
 				"/test/.obsidian/plugins/anti-ephemeral-state/db";
 
@@ -110,7 +110,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 		});
 
 		it("should create database directory if it doesn't exist", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 			const dbDir = "/test/.obsidian/plugins/anti-ephemeral-state/db";
 
 			// Ensure directory doesn't exist
@@ -127,7 +127,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 		});
 
 		it("should not fail if database directory already exists", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 			const dbDir = "/test/.obsidian/plugins/anti-ephemeral-state/db";
 
 			// Pre-create the directory
@@ -145,7 +145,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 		});
 
 		it("should handle database directory creation errors gracefully", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 
 			// Mock mkdir to throw error
 			const originalMkdir = vault.adapter.mkdir;
@@ -293,7 +293,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 
 	describe("Full lifecycle integration", () => {
 		it("should complete full load → use → unload cycle", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 			const dbDir = "/test/.obsidian/plugins/anti-ephemeral-state/db";
 
 			// Initial state
@@ -366,7 +366,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 
 	describe("Database directory creation scenarios", () => {
 		it("should create nested directory structure", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 			const dbDir = "/test/.obsidian/plugins/anti-ephemeral-state/db";
 
 			await plugin.onload();
@@ -389,7 +389,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 				dbDir: "/custom/database/path",
 			});
 
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 
 			await plugin.onload();
 
@@ -403,7 +403,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 		it("should handle paths with special characters", async () => {
 			const testApp = TestUtils.createMockApp("/test/üñíçødé/.obsidian");
 			const testPlugin = createPlugin(testApp, manifest);
-			const vault = testApp.vault as MockVault;
+			const vault = testApp.vault;
 
 			await testPlugin.onload();
 
@@ -478,7 +478,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 
 			// Mock console.log to verify skip message
 			const logSpy = jest
-				.spyOn(console, "log")
+				.spyOn(console, "debug")
 				.mockImplementation(() => {});
 
 			// Try to attach again
