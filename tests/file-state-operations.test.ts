@@ -713,17 +713,17 @@ describe("AntiEphemeralState File State Operations", () => {
 				"# Wrong path content"
 			);
 
-			// Mock console.log to capture validation report
-			const originalConsoleLog = console.log;
+			// Mock console.debug to capture validation report
+			const originalConsoleDebug = console.debug;
 			const logCalls: unknown[][] = [];
-			console.log = (...args: unknown[]) => {
+			console.debug = (...args: unknown[]) => {
 				logCalls.push(args);
 			};
 
 			await plugin.validateDatabase();
 
-			// Restore console.log
-			console.log = originalConsoleLog;
+			// Restore console.debug
+			console.debug = originalConsoleDebug;
 
 			// Check that validation report was logged
 			const validationReport = logCalls.find(

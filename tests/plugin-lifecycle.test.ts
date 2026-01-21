@@ -27,7 +27,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 	let plugin: AntiEphemeralState;
 	let app: App;
 	let manifest: MockManifest;
-	let consoleSpy: jest.SpiedFunction<typeof console.log>;
+	let consoleSpy: jest.SpiedFunction<typeof console.debug>;
 	let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
 
 	beforeEach(() => {
@@ -41,7 +41,9 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 		plugin = createPlugin(app, manifest);
 
 		// Setup console spies
-		consoleSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+		consoleSpy = jest
+			.spyOn(console, "debug")
+			.mockImplementation(() => {});
 		consoleErrorSpy = jest
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
@@ -478,7 +480,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 
 			// Mock console.log to verify skip message
 			const logSpy = jest
-				.spyOn(console, "log")
+				.spyOn(console, "debug")
 				.mockImplementation(() => {});
 
 			// Try to attach again
