@@ -29,7 +29,7 @@ describe("Lock Mode – Unit", () => {
 		// Create plugin instance using a precise constructor typing (no unknown/any)
 		plugin = new (AntiEphemeralState as AESCtor)(app, manifest);
 
-		mockVault = app.vault as MockVault;
+		mockVault = app.vault;
 
 		// Initialize settings with Lock Mode enabled
 		plugin.DEFAULT_SETTINGS = {
@@ -42,7 +42,7 @@ describe("Lock Mode – Unit", () => {
 	afterEach(() => {
 		if (mockVault?.adapter && "reset" in mockVault.adapter) {
 			// Narrow to MockVaultAdapter at runtime shape
-			// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+
 			// @ts-ignore - test utility method present on mock adapter
 			mockVault.adapter.reset();
 		}

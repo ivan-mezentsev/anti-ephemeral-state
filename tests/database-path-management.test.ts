@@ -10,7 +10,7 @@ import { App, MockVault, TestUtils, MockManifest } from "./__mocks__/obsidian";
 const createPlugin = (app: App, manifest: MockManifest): AntiEphemeralState => {
 	// Mock manifest must be passed to Plugin constructor
 	// since Plugin expects obsidian's PluginManifest but we provide MockManifest
-	return new AntiEphemeralState(app as App, manifest as MockManifest);
+	return new AntiEphemeralState(app, manifest);
 };
 
 describe("AntiEphemeralState Database Path Management", () => {
@@ -31,8 +31,8 @@ describe("AntiEphemeralState Database Path Management", () => {
 
 	afterEach(() => {
 		// Clean up mock file system
-		if (app?.vault && (app.vault as MockVault).adapter) {
-			(app.vault as MockVault).adapter.reset();
+		if (app?.vault && app.vault.adapter) {
+			app.vault.adapter.reset();
 		}
 	});
 

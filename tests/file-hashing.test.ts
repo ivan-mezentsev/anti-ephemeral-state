@@ -7,7 +7,7 @@ import AntiEphemeralState from "../main";
 import { App, MockVault, TestUtils, MockManifest } from "./__mocks__/obsidian";
 
 const createPlugin = (app: App, manifest: MockManifest): AntiEphemeralState => {
-	return new AntiEphemeralState(app as App, manifest as MockManifest);
+	return new AntiEphemeralState(app, manifest);
 };
 
 describe("AntiEphemeralState File Hashing", () => {
@@ -28,8 +28,8 @@ describe("AntiEphemeralState File Hashing", () => {
 
 	afterEach(() => {
 		// Clean up mock file system
-		if (app?.vault && (app.vault as MockVault).adapter) {
-			(app.vault as MockVault).adapter.reset();
+		if (app?.vault && app.vault.adapter) {
+			app.vault.adapter.reset();
 		}
 	});
 

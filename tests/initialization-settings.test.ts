@@ -21,7 +21,7 @@ interface PluginWithMockMethods extends AntiEphemeralState {
 const createPlugin = (app: App, manifest: MockManifest): AntiEphemeralState => {
 	// Mock manifest must be passed to Plugin constructor
 	// since Plugin expects obsidian's PluginManifest but we provide MockManifest
-	return new AntiEphemeralState(app as App, manifest as MockManifest);
+	return new AntiEphemeralState(app, manifest);
 };
 
 describe("AntiEphemeralState Initialization and Settings", () => {
@@ -42,8 +42,8 @@ describe("AntiEphemeralState Initialization and Settings", () => {
 
 	afterEach(() => {
 		// Clean up mock file system
-		if (app?.vault && (app.vault as MockVault).adapter) {
-			(app.vault as MockVault).adapter.reset();
+		if (app?.vault && app.vault.adapter) {
+			app.vault.adapter.reset();
 		}
 	});
 
@@ -292,7 +292,7 @@ describe("AntiEphemeralState Initialization and Settings", () => {
 
 	describe("Database directory creation", () => {
 		it("should create database directory during onload if it doesn't exist", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 
 			// Ensure directory doesn't exist initially
 			expect(
@@ -310,7 +310,7 @@ describe("AntiEphemeralState Initialization and Settings", () => {
 		});
 
 		it("should not fail if database directory already exists", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 
 			// Pre-create the directory
 			await vault.adapter.mkdir(
@@ -322,7 +322,7 @@ describe("AntiEphemeralState Initialization and Settings", () => {
 		});
 
 		it("should handle directory creation errors gracefully", async () => {
-			const vault = app.vault as MockVault;
+			const vault = app.vault;
 
 			// Mock mkdir to throw error
 			const originalMkdir = vault.adapter.mkdir;

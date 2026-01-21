@@ -52,10 +52,10 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 function isParsedStateMinimal(v: unknown): v is ParsedStateMinimal {
 	if (!isObject(v)) return false;
-	const vs = (v as Record<string, unknown>).viewState;
+	const vs = v.viewState;
 	if (vs === undefined) return true; // viewState is optional
 	if (!isObject(vs)) return false;
-	const file = (vs as Record<string, unknown>).file;
+	const file = vs.file;
 	return file === undefined || typeof file === "string";
 }
 
@@ -133,7 +133,7 @@ export default class AntiEphemeralState extends Plugin {
 				const ensureLockDefaults = (obj: unknown): boolean => {
 					if (!isObject(obj)) return false;
 					let changed = false;
-					const rec = obj as Record<string, unknown>;
+					const rec = obj;
 					if (typeof rec.protected !== "boolean") {
 						rec.protected = false;
 						changed = true;
@@ -1484,7 +1484,7 @@ class LockManager {
 		if (!locked) return;
 
 		// Check current mode; if already preview, do nothing
-		const rawState = active.getState() as Record<string, unknown>;
+		const rawState = active.getState();
 		const mode =
 			typeof rawState.mode === "string" ? rawState.mode : undefined;
 		if (mode === "preview") return;
@@ -1499,7 +1499,7 @@ class LockManager {
 		// Switch to preview using official API
 		await active.setState(
 			{
-				...(active.getState() as Record<string, unknown>),
+				...active.getState(),
 				mode: "preview",
 			},
 			{ history: false }

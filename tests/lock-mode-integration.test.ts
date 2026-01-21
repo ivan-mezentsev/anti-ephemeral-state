@@ -87,7 +87,7 @@ async function setupPluginWithView() {
  * Accessor helpers (to avoid loosening types)
  */
 function getMockVault(app: App): MockVault {
-	return app.vault as MockVault;
+	return app.vault;
 }
 
 function isMockVaultAdapter(adapter: DataAdapter): adapter is MockVaultAdapter {

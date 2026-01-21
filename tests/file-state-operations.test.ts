@@ -34,7 +34,7 @@ describe("AntiEphemeralState File State Operations", () => {
 			manifest: MockManifest
 		) => AntiEphemeralState)(app, manifest);
 
-		mockVault = app.vault as MockVault;
+		mockVault = app.vault;
 
 		// Initialize plugin settings with lock mode enabled by default
 		plugin.DEFAULT_SETTINGS = {
