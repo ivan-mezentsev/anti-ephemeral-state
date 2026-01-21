@@ -127,7 +127,10 @@ export default class AntiEphemeralState extends Plugin {
 					return true;
 				};
 
-				const parsedData = JSON.parse(data);
+				const parsedData = JSON.parse(data) as unknown;
+				if (!isObject(parsedData)) {
+					return null;
+				}
 
 				// Ensure Lock Mode fields have defaults for backward compatibility
 				const ensureLockDefaults = (obj: unknown): boolean => {
@@ -154,8 +157,12 @@ export default class AntiEphemeralState extends Plugin {
 				// Validate viewState.file field
 				if (!validateViewStateFile(parsedData, filePath)) {
 					// Update the invalid viewState.file field immediately
-					if (parsedData.viewState) {
-						parsedData.viewState.file = filePath;
+					if (
+						isParsedStateMinimal(parsedData) &&
+						parsedData.viewState
+					) {
+						(parsedData.viewState as MinimalViewState).file =
+							filePath;
 					}
 					// Save the corrected data back to the file (also persists defaults)
 					await this.app.vault.adapter.write(
@@ -163,7 +170,7 @@ export default class AntiEphemeralState extends Plugin {
 						JSON.stringify(parsedData)
 					);
 					// Return the corrected data
-					return parsedData;
+					return parsedData as TemporaryState;
 				}
 
 				let containsFlashingSpan =
@@ -178,7 +185,7 @@ export default class AntiEphemeralState extends Plugin {
 							JSON.stringify(parsedData)
 						);
 					}
-					return parsedData;
+					return parsedData as TemporaryState;
 				} else {
 					return null;
 				}
@@ -742,7 +749,7 @@ export default class AntiEphemeralState extends Plugin {
 		if (!this.lastTemporaryState) this.lastTemporaryState = state;
 
 		if (!this.TemporaryStatesSame(state, this.lastTemporaryState)) {
-			this.saveTemporaryState(state);
+			void this.saveTemporaryState(state);
 			// Update last known state
 			this.lastTemporaryState = state;
 		}
@@ -1174,10 +1181,12 @@ export default class AntiEphemeralState extends Plugin {
 	}
 
 	async loadSettings() {
+		const loaded = (await this.loadData()) as unknown;
+		const loadedSettings = isObject(loaded) ? loaded : {};
 		let settings: PluginSettings = Object.assign(
 			{},
 			this.DEFAULT_SETTINGS,
-			await this.loadData()
+			loadedSettings
 		);
 		// Apply default for lockModeEnabled (enabled by default)
 		if (typeof settings.lockModeEnabled !== "boolean") {
@@ -1353,7 +1362,11 @@ class LockStatusBar {
 		this.plugin = plugin;
 		this.el = this.plugin.addStatusBarItem();
 		this.el.classList.add("aes-lock-status");
-		this.el.addEventListener("click", () => this.onClick());
+		this.el.addEventListener("click", () => {
+			void this.onClick().catch(e =>
+				console.warn("[AES] Lock toggle failed:", e)
+			);
+		});
 		this.updateIcon(this.state);
 	}
 
