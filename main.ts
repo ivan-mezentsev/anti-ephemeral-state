@@ -234,6 +234,7 @@ export default class AntiEphemeralState extends Plugin {
 		try {
 			// Ensure database directory exists
 			if (!(await this.app.vault.adapter.exists(dbDir))) {
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix in this notice text.
 				new Notice("[AES] Validation: database directory not found");
 				return;
 			}
@@ -328,6 +329,7 @@ export default class AntiEphemeralState extends Plugin {
 			});
 		} catch (e) {
 			console.error("[AES] Error validating database directory:", e);
+			// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix and multi-sentence notice text.
 			new Notice("[AES] Validation failed. See console.");
 		}
 	}
@@ -872,6 +874,7 @@ export default class AntiEphemeralState extends Plugin {
 			);
 			// Show user notification about restoration failure
 			new Notice(
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix in this notice text.
 				"[AES] Failed to restore note state. Try reopening the note.",
 				3000
 			);
@@ -1288,13 +1291,18 @@ class SettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Database validation")
 			.setDesc(
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Contains the technical field name "viewState.file".
 				"Iterate over database entries, fix wrong viewState.file, and remove entries for missing notes"
 			)
 			.addButton(btn => {
 				btn.setButtonText("Run validation")
 					.setCta()
 					.onClick(async () => {
-						new Notice("[AES] Validation started...", 1000);
+						new Notice(
+							// eslint-disable-next-line obsidianmd/ui/sentence-case -- Keep the plugin prefix in this notice text.
+							"[AES] Validation started...",
+							1000
+						);
 						await this.plugin.validateDatabase();
 					});
 			});
