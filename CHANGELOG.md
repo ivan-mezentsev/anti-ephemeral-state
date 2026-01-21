@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.3 - 2026-01-21
+
+- refactor(logging): replace console.log with console.debug
+- refactor(tests): fix lint
+- chore(package): update linting configuration and dependencies
+
 ## 1.1.0 - 2025-08-18
 
 - feat: add Lock Mode (status bar lock/unlock, Reading enforcement, external change indicator, live enable/disable)
