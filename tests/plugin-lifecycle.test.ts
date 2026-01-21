@@ -41,9 +41,7 @@ describe("AntiEphemeralState Plugin Lifecycle", () => {
 		plugin = createPlugin(app, manifest);
 
 		// Setup console spies
-		consoleSpy = jest
-			.spyOn(console, "debug")
-			.mockImplementation(() => {});
+		consoleSpy = jest.spyOn(console, "debug").mockImplementation(() => {});
 		consoleErrorSpy = jest
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
