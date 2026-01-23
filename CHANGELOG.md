@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.4 - 2026-01-23
+
+- feat(eslint): enhance linting configuration for TypeScript and ESLint  - comments
+- mute obsidianmd/ui/sentence-case
+
 ## 1.1.3 - 2026-01-21
 
 - refactor(logging): replace console.log with console.debug
